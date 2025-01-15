@@ -18,42 +18,43 @@
  */
 package org.apache.fineract.infrastructure.campaigns.email.api;
 
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.UriInfo;
 import java.time.LocalDate;
 import java.util.Collection;
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.PUT;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.UriInfo;
 import lombok.RequiredArgsConstructor;
-import org.apache.fineract.accounting.journalentry.api.DateParam;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.commands.domain.CommandWrapper;
 import org.apache.fineract.commands.service.CommandWrapperBuilder;
 import org.apache.fineract.commands.service.PortfolioCommandSourceWritePlatformService;
 import org.apache.fineract.infrastructure.campaigns.email.data.EmailData;
 import org.apache.fineract.infrastructure.campaigns.email.service.EmailReadPlatformService;
 import org.apache.fineract.infrastructure.core.api.ApiRequestParameterHelper;
+import org.apache.fineract.infrastructure.core.api.DateParam;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
+import org.apache.fineract.infrastructure.core.data.DateFormat;
 import org.apache.fineract.infrastructure.core.serialization.ApiRequestJsonSerializationSettings;
 import org.apache.fineract.infrastructure.core.serialization.DefaultToApiJsonSerializer;
 import org.apache.fineract.infrastructure.core.service.Page;
 import org.apache.fineract.infrastructure.core.service.SearchParameters;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
-import org.springframework.context.annotation.Scope;
+import org.apache.fineract.infrastructure.security.service.SqlValidator;
 import org.springframework.stereotype.Component;
 
-@Path("/email")
+@Path("/v1/email")
 @Consumes({ MediaType.APPLICATION_JSON })
 @Produces({ MediaType.APPLICATION_JSON })
 @Component
-@Scope("singleton")
 @RequiredArgsConstructor
 public class EmailApiResource {
 
@@ -63,6 +64,7 @@ public class EmailApiResource {
     private final DefaultToApiJsonSerializer<EmailData> toApiJsonSerializer;
     private final ApiRequestParameterHelper apiRequestParameterHelper;
     private final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService;
+    private final SqlValidator sqlValidator;
 
     @GET
     public String retrieveAllEmails(@Context final UriInfo uriInfo) {
@@ -74,12 +76,14 @@ public class EmailApiResource {
 
     @GET
     @Path("pendingEmail")
-    public String retrievePendingEmail(@QueryParam("sqlSearch") final String sqlSearch, @QueryParam("offset") final Integer offset,
-            @QueryParam("limit") final Integer limit, @QueryParam("orderBy") final String orderBy,
-            @QueryParam("sortOrder") final String sortOrder, @Context final UriInfo uriInfo) {
+    public String retrievePendingEmail(@QueryParam("offset") final Integer offset, @QueryParam("limit") final Integer limit,
+            @QueryParam("orderBy") final String orderBy, @QueryParam("sortOrder") final String sortOrder, @Context final UriInfo uriInfo) {
 
         context.authenticatedUser().validateHasReadPermission(RESOURCE_NAME_FOR_PERMISSIONS);
-        final SearchParameters searchParameters = SearchParameters.forEmailCampaign(sqlSearch, offset, limit, orderBy, sortOrder);
+        sqlValidator.validate(orderBy);
+        sqlValidator.validate(sortOrder);
+        final SearchParameters searchParameters = SearchParameters.builder().limit(limit).offset(offset).orderBy(orderBy)
+                .sortOrder(sortOrder).build();
         Collection<EmailData> emailMessages = readPlatformService.retrieveAllPending(searchParameters);
         final ApiRequestJsonSerializationSettings settings = apiRequestParameterHelper.process(uriInfo.getQueryParameters());
         return toApiJsonSerializer.serialize(settings, emailMessages);
@@ -87,13 +91,15 @@ public class EmailApiResource {
 
     @GET
     @Path("sentEmail")
-    public String retrieveSentEmail(@QueryParam("sqlSearch") final String sqlSearch, @QueryParam("offset") final Integer offset,
-            @QueryParam("limit") final Integer limit, @QueryParam("orderBy") final String orderBy,
-            @QueryParam("sortOrder") final String sortOrder, @Context final UriInfo uriInfo) {
+    public String retrieveSentEmail(@QueryParam("offset") final Integer offset, @QueryParam("limit") final Integer limit,
+            @QueryParam("orderBy") final String orderBy, @QueryParam("sortOrder") final String sortOrder, @Context final UriInfo uriInfo) {
 
         context.authenticatedUser().validateHasReadPermission(RESOURCE_NAME_FOR_PERMISSIONS);
 
-        final SearchParameters searchParameters = SearchParameters.forEmailCampaign(sqlSearch, offset, limit, orderBy, sortOrder);
+        sqlValidator.validate(orderBy);
+        sqlValidator.validate(sortOrder);
+        final SearchParameters searchParameters = SearchParameters.builder().limit(limit).offset(offset).orderBy(orderBy)
+                .sortOrder(sortOrder).build();
         Collection<EmailData> emailMessages = readPlatformService.retrieveAllSent(searchParameters);
 
         final ApiRequestJsonSerializationSettings settings = apiRequestParameterHelper.process(uriInfo.getQueryParameters());
@@ -106,7 +112,10 @@ public class EmailApiResource {
             @QueryParam("limit") final Integer limit, @QueryParam("status") final Integer status,
             @QueryParam("orderBy") final String orderBy, @QueryParam("sortOrder") final String sortOrder,
             @QueryParam("fromDate") final DateParam fromDateParam, @QueryParam("toDate") final DateParam toDateParam,
-            @QueryParam("locale") final String locale, @QueryParam("dateFormat") final String dateFormat, @Context final UriInfo uriInfo) {
+            @QueryParam("locale") final String locale, @QueryParam("dateFormat") final String rawDateFormat,
+            @Context final UriInfo uriInfo) {
+
+        final DateFormat dateFormat = StringUtils.isBlank(rawDateFormat) ? null : new DateFormat(rawDateFormat);
 
         this.context.authenticatedUser().validateHasReadPermission(RESOURCE_NAME_FOR_PERMISSIONS);
         LocalDate fromDate = null;
@@ -130,7 +139,10 @@ public class EmailApiResource {
 
         context.authenticatedUser().validateHasReadPermission(RESOURCE_NAME_FOR_PERMISSIONS);
 
-        final SearchParameters searchParameters = SearchParameters.forEmailCampaign(sqlSearch, offset, limit, orderBy, sortOrder);
+        sqlValidator.validate(orderBy);
+        sqlValidator.validate(sortOrder);
+        final SearchParameters searchParameters = SearchParameters.builder().limit(limit).offset(offset).orderBy(orderBy)
+                .sortOrder(sortOrder).build();
         Collection<EmailData> emailMessages = readPlatformService.retrieveAllFailed(searchParameters);
 
         final ApiRequestJsonSerializationSettings settings = apiRequestParameterHelper.process(uriInfo.getQueryParameters());

@@ -22,9 +22,10 @@ import java.util.List;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuilder;
-import org.apache.fineract.infrastructure.core.exception.PlatformDataIntegrityException;
+import org.apache.fineract.infrastructure.core.exception.ErrorHandler;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
 import org.apache.fineract.infrastructure.survey.data.LikelihoodDataValidator;
+import org.apache.fineract.infrastructure.survey.data.LikelihoodStatus;
 import org.apache.fineract.infrastructure.survey.domain.Likelihood;
 import org.apache.fineract.infrastructure.survey.domain.LikelihoodRepository;
 import org.slf4j.Logger;
@@ -74,7 +75,7 @@ public class WriteLikelihoodServiceImpl implements WriteLikelihoodService {
                             likelihood.getId());
 
                     for (Likelihood aLikelihood : likelihoods) {
-                        aLikelihood.disable();
+                        aLikelihood.setEnabled(LikelihoodStatus.DISABLED);
                     }
                     this.repository.saveAll(likelihoods);
                 }
@@ -95,9 +96,8 @@ public class WriteLikelihoodServiceImpl implements WriteLikelihoodService {
      * Guaranteed to throw an exception no matter what the data integrity issue is.
      */
     private void handleDataIntegrityIssues(final Throwable realCause, final NonTransientDataAccessException dve) {
-
         LOG.error("Error occured.", dve);
-        throw new PlatformDataIntegrityException("error.msg.likelihood.unknown.data.integrity.issue",
+        throw ErrorHandler.getMappable(dve, "error.msg.likelihood.unknown.data.integrity.issue",
                 "Unknown data integrity issue with resource: " + realCause.getMessage());
     }
 }

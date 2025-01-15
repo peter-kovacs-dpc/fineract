@@ -21,6 +21,7 @@ package org.apache.fineract.portfolio.self.registration.service;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.reflect.TypeToken;
+import jakarta.persistence.PersistenceException;
 import java.lang.reflect.Type;
 import java.security.SecureRandom;
 import java.util.ArrayList;
@@ -30,7 +31,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import javax.persistence.PersistenceException;
+import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.fineract.infrastructure.campaigns.sms.data.SmsProviderData;
 import org.apache.fineract.infrastructure.campaigns.sms.domain.SmsCampaign;
@@ -39,6 +40,7 @@ import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.ApiParameterError;
 import org.apache.fineract.infrastructure.core.data.DataValidatorBuilder;
 import org.apache.fineract.infrastructure.core.domain.EmailDetail;
+import org.apache.fineract.infrastructure.core.exception.ErrorHandler;
 import org.apache.fineract.infrastructure.core.exception.PlatformApiDataValidationException;
 import org.apache.fineract.infrastructure.core.exception.PlatformDataIntegrityException;
 import org.apache.fineract.infrastructure.core.serialization.FromJsonHelper;
@@ -64,15 +66,13 @@ import org.apache.fineract.useradministration.domain.RoleRepository;
 import org.apache.fineract.useradministration.domain.UserDomainService;
 import org.apache.fineract.useradministration.exception.RoleNotFoundException;
 import org.apache.fineract.useradministration.service.AppUserReadPlatformService;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
-import org.springframework.stereotype.Service;
 
-@Service
+@RequiredArgsConstructor
 public class SelfServiceRegistrationWritePlatformServiceImpl implements SelfServiceRegistrationWritePlatformService {
 
     private final SelfServiceRegistrationRepository selfServiceRegistrationRepository;
@@ -83,34 +83,11 @@ public class SelfServiceRegistrationWritePlatformServiceImpl implements SelfServ
     private final UserDomainService userDomainService;
     private final GmailBackedPlatformEmailService gmailBackedPlatformEmailService;
     private final SmsMessageRepository smsMessageRepository;
-    private SmsMessageScheduledJobService smsMessageScheduledJobService;
+    private final SmsMessageScheduledJobService smsMessageScheduledJobService;
     private final SmsCampaignDropdownReadPlatformService smsCampaignDropdownReadPlatformService;
     private final AppUserReadPlatformService appUserReadPlatformService;
     private final RoleRepository roleRepository;
     private static final SecureRandom secureRandom = new SecureRandom();
-
-    @Autowired
-    public SelfServiceRegistrationWritePlatformServiceImpl(final SelfServiceRegistrationRepository selfServiceRegistrationRepository,
-            final FromJsonHelper fromApiJsonHelper,
-            final SelfServiceRegistrationReadPlatformService selfServiceRegistrationReadPlatformService,
-            final ClientRepositoryWrapper clientRepository, final PasswordValidationPolicyRepository passwordValidationPolicy,
-            final UserDomainService userDomainService, final GmailBackedPlatformEmailService gmailBackedPlatformEmailService,
-            final SmsMessageRepository smsMessageRepository, SmsMessageScheduledJobService smsMessageScheduledJobService,
-            final SmsCampaignDropdownReadPlatformService smsCampaignDropdownReadPlatformService,
-            final AppUserReadPlatformService appUserReadPlatformService, final RoleRepository roleRepository) {
-        this.selfServiceRegistrationRepository = selfServiceRegistrationRepository;
-        this.fromApiJsonHelper = fromApiJsonHelper;
-        this.selfServiceRegistrationReadPlatformService = selfServiceRegistrationReadPlatformService;
-        this.clientRepository = clientRepository;
-        this.passwordValidationPolicy = passwordValidationPolicy;
-        this.userDomainService = userDomainService;
-        this.gmailBackedPlatformEmailService = gmailBackedPlatformEmailService;
-        this.smsMessageRepository = smsMessageRepository;
-        this.smsMessageScheduledJobService = smsMessageScheduledJobService;
-        this.smsCampaignDropdownReadPlatformService = smsCampaignDropdownReadPlatformService;
-        this.appUserReadPlatformService = appUserReadPlatformService;
-        this.roleRepository = roleRepository;
-    }
 
     @Override
     public SelfServiceRegistration createRegistrationRequest(String apiRequestBodyAsJson) {
@@ -308,7 +285,7 @@ public class SelfServiceRegistrationWritePlatformServiceImpl implements SelfServ
             throw new PlatformDataIntegrityException("error.msg.user.duplicate.username", defaultMessageBuilder.toString(), "username",
                     username);
         }
-        throw new PlatformDataIntegrityException("error.msg.unknown.data.integrity.issue", "Unknown data integrity issue with resource.");
+        throw ErrorHandler.getMappable(dve, "error.msg.unknown.data.integrity.issue", "Unknown data integrity issue with resource.");
     }
 
 }

@@ -113,7 +113,7 @@ public final class CenterHelper {
         if (activationDate != null) {
             hm.put("active", true);
             hm.put("locale", "en");
-            hm.put("dateFormat", "dd MMM yyyy");
+            hm.put("dateFormat", "dd MMMM yyyy");
             hm.put("activationDate", activationDate);
         }
 
@@ -269,7 +269,7 @@ public final class CenterHelper {
     }
 
     public static String randomNameGenerator(final String prefix, final int lenOfRandomSuffix) {
-        return Utils.randomStringGenerator(prefix, lenOfRandomSuffix);
+        return Utils.uniqueRandomStringGenerator(prefix, lenOfRandomSuffix);
     }
 
     public static Object assignStaff(final RequestSpecification requestSpec, final ResponseSpecification responseSpec, final String groupId,

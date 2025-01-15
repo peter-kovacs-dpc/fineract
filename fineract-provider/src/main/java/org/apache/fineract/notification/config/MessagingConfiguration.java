@@ -18,10 +18,10 @@
  */
 package org.apache.fineract.notification.config;
 
-import javax.jms.ExceptionListener;
-import javax.jms.JMSException;
+import jakarta.jms.ExceptionListener;
+import jakarta.jms.JMSException;
 import org.apache.activemq.ActiveMQConnectionFactory;
-import org.apache.fineract.infrastructure.core.config.EnableFineractEventsCondition;
+import org.apache.fineract.infrastructure.core.condition.EnableFineractEventsCondition;
 import org.apache.fineract.notification.eventandlistener.NotificationEventListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

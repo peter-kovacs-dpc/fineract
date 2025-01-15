@@ -24,46 +24,72 @@ import com.google.common.reflect.TypeToken;
 import com.google.gson.Gson;
 import io.restassured.specification.RequestSpecification;
 import io.restassured.specification.ResponseSpecification;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.MediaType;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.MediaType;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.fineract.client.models.ClientTextSearch;
+import org.apache.fineract.client.models.DeleteClientsClientIdResponse;
 import org.apache.fineract.client.models.GetClientClientIdAddressesResponse;
+import org.apache.fineract.client.models.GetClientTransferProposalDateResponse;
+import org.apache.fineract.client.models.GetClientsClientIdAccountsResponse;
 import org.apache.fineract.client.models.GetClientsClientIdResponse;
+import org.apache.fineract.client.models.GetClientsClientIdTransactionsResponse;
+import org.apache.fineract.client.models.GetClientsClientIdTransactionsTransactionIdResponse;
+import org.apache.fineract.client.models.GetLoanAccountLockResponse;
+import org.apache.fineract.client.models.GetObligeeData;
+import org.apache.fineract.client.models.PageClientSearchData;
+import org.apache.fineract.client.models.PagedRequestClientTextSearch;
 import org.apache.fineract.client.models.PostClientClientIdAddressesRequest;
 import org.apache.fineract.client.models.PostClientClientIdAddressesResponse;
+import org.apache.fineract.client.models.PostClientsClientIdIdentifiersRequest;
+import org.apache.fineract.client.models.PostClientsClientIdIdentifiersResponse;
+import org.apache.fineract.client.models.PostClientsClientIdResponse;
+import org.apache.fineract.client.models.PostClientsClientIdTransactionsTransactionIdResponse;
 import org.apache.fineract.client.models.PostClientsRequest;
+import org.apache.fineract.client.models.PostClientsResponse;
+import org.apache.fineract.client.models.PutClientsClientIdResponse;
+import org.apache.fineract.client.models.SortOrder;
 import org.apache.fineract.client.util.JSON;
 import org.apache.fineract.infrastructure.bulkimport.data.GlobalEntityType;
+import org.apache.fineract.integrationtests.client.IntegrationTest;
 import org.apache.fineract.integrationtests.common.system.CodeHelper;
 import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.ss.usermodel.Workbook;
 
 @Slf4j
 @RequiredArgsConstructor
-public class ClientHelper {
+public class ClientHelper extends IntegrationTest {
 
-    private static final String CREATE_CLIENT_URL = "/fineract-provider/api/v1/clients?" + Utils.TENANT_IDENTIFIER;
     private static final String CLIENT_URL = "/fineract-provider/api/v1/clients";
-    private static final String CLOSE_CLIENT_COMMAND = "close";
-    private static final String REACTIVATE_CLIENT_COMMAND = "reactivate";
-    private static final String REJECT_CLIENT_COMMAND = "reject";
-    private static final String ACTIVATE_CLIENT_COMMAND = "activate";
-    private static final String WITHDRAW_CLIENT_COMMAND = "withdraw";
-    private static final String UNDOREJECT_CLIENT_COMMAND = "undoRejection";
-    private static final String UNDOWITHDRAWN_CLIENT_COMMAND = "undoWithdrawal";
-    private static final Integer LEGALFORM_ID_PERSON = 1;
+    private static final String CREATE_CLIENT_URL = CLIENT_URL + "?" + Utils.TENANT_IDENTIFIER;
+    private static final String CLIENT_EXTERNALID_URL = CLIENT_URL + "/external-id";
+
+    public static final String CLOSE_CLIENT_COMMAND = "close";
+    public static final String REACTIVATE_CLIENT_COMMAND = "reactivate";
+    public static final String REJECT_CLIENT_COMMAND = "reject";
+    public static final String ACTIVATE_CLIENT_COMMAND = "activate";
+    public static final String WITHDRAW_CLIENT_COMMAND = "withdraw";
+    public static final String UNDOREJECT_CLIENT_COMMAND = "undoRejection";
+    public static final String UNDOWITHDRAWN_CLIENT_COMMAND = "undoWithdrawal";
+    public static final String DEFAULT_OFFICE_ID = "1";
+    public static final Long LEGALFORM_ID_PERSON = 1L;
+    public static final Long LEGALFORM_ID_ENTITY = 2L;
     public static final String CREATED_DATE = Utils.getLocalDateOfTenant().minusDays(5).format(Utils.dateFormatter);
     public static final String CREATED_DATE_PLUS_ONE = Utils.getLocalDateOfTenant().minusDays(4).format(Utils.dateFormatter);
     public static final String CREATED_DATE_PLUS_TWO = Utils.getLocalDateOfTenant().minusDays(3).format(Utils.dateFormatter);
+
+    public static final String DEFAULT_DATE = "04 March 2011";
 
     private static final Gson GSON = new JSON().getGson();
 
@@ -77,8 +103,95 @@ public class ClientHelper {
         return Utils.performServerPost(requestSpec, responseSpec, CREATE_CLIENT_URL, requestBody, "clientId");
     }
 
+    public PostClientsResponse createClient(final PostClientsRequest request) {
+        return ok(fineract().clients.create6(request));
+    }
+
+    public PostClientsClientIdIdentifiersResponse createClientIdentifer(final Long clientId,
+            final PostClientsClientIdIdentifiersRequest request) {
+        return ok(fineract().clientIdentifiers.createClientIdentifier(clientId, request));
+    }
+
+    public PageClientSearchData searchClients(String text) {
+        ClientTextSearch clientTextSearch = new ClientTextSearch();
+        clientTextSearch.setText(text);
+        PagedRequestClientTextSearch request = new PagedRequestClientTextSearch();
+        request.setRequest(clientTextSearch);
+        return searchClients(request);
+    }
+
+    public PageClientSearchData searchClients(String text, int page, int pageSize) {
+        ClientTextSearch clientTextSearch = new ClientTextSearch();
+        clientTextSearch.setText(text);
+        PagedRequestClientTextSearch request = new PagedRequestClientTextSearch();
+        request.setRequest(clientTextSearch);
+        request.setPage(page);
+        request.setSize(pageSize);
+        return searchClients(request);
+    }
+
+    public PageClientSearchData searchClients(String text, SortOrder sortOrder) {
+        ClientTextSearch clientTextSearch = new ClientTextSearch();
+        clientTextSearch.setText(text);
+        PagedRequestClientTextSearch request = new PagedRequestClientTextSearch();
+        request.setRequest(clientTextSearch);
+        request.setSorts(List.of(sortOrder));
+        return searchClients(request);
+    }
+
+    public PageClientSearchData searchClients(PagedRequestClientTextSearch request) {
+        return ok(fineract().clientSearchV2.searchByText(request));
+    }
+
+    public static PostClientsResponse addClientAsPerson(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
+            final String jsonPayload) {
+        final String response = Utils.performServerPost(requestSpec, responseSpec, CREATE_CLIENT_URL, jsonPayload);
+        log.info("{}", response);
+        return GSON.fromJson(response, PostClientsResponse.class);
+    }
+
+    public static PutClientsClientIdResponse updateClient(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
+            final String externalId, final String jsonPayload) {
+        final String url = CLIENT_EXTERNALID_URL + "/" + externalId + "?" + Utils.TENANT_IDENTIFIER;
+        final String response = Utils.performServerPut(requestSpec, responseSpec, url, jsonPayload);
+        log.info("{}", response);
+        return GSON.fromJson(response, PutClientsClientIdResponse.class);
+    }
+
+    public static DeleteClientsClientIdResponse deleteClient(final RequestSpecification requestSpec,
+            final ResponseSpecification responseSpec, final String externalId) {
+        final String url = CLIENT_EXTERNALID_URL + "/" + externalId + "?" + Utils.TENANT_IDENTIFIER;
+        final String response = Utils.performServerDelete(requestSpec, responseSpec, url, Utils.emptyJson(), null);
+        log.info("{}", response);
+        return GSON.fromJson(response, DeleteClientsClientIdResponse.class);
+    }
+
+    public static GetClientsClientIdAccountsResponse getClientAccounts(final RequestSpecification requestSpec,
+            final ResponseSpecification responseSpec, final String externalId) {
+        final String url = CLIENT_EXTERNALID_URL + "/" + externalId + "/accounts?" + Utils.TENANT_IDENTIFIER;
+        final String response = Utils.performServerGet(requestSpec, responseSpec, url);
+        log.info("{}", response);
+        return GSON.fromJson(response, GetClientsClientIdAccountsResponse.class);
+    }
+
+    public static GetClientTransferProposalDateResponse getProposedTransferDate(final RequestSpecification requestSpec,
+            final ResponseSpecification responseSpec, final String externalId) {
+        final String url = CLIENT_EXTERNALID_URL + "/" + externalId + "/transferproposaldate?" + Utils.TENANT_IDENTIFIER;
+        final String response = Utils.performServerGet(requestSpec, responseSpec, url);
+        log.info("{}", response);
+        return GSON.fromJson(response, GetClientTransferProposalDateResponse.class);
+    }
+
+    public static List<GetObligeeData> getObligeeData(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
+            final String externalId) {
+        final String url = CLIENT_EXTERNALID_URL + "/" + externalId + "/obligeedetails?" + Utils.TENANT_IDENTIFIER;
+        final String response = Utils.performServerGet(requestSpec, responseSpec, url);
+        log.info("{}", response);
+        return GSON.fromJson(response, new TypeToken<List<GetObligeeData>>() {}.getType());
+    }
+
     public static Integer createClient(final RequestSpecification requestSpec, final ResponseSpecification responseSpec) {
-        return createClient(requestSpec, responseSpec, "04 March 2011");
+        return createClient(requestSpec, responseSpec, DEFAULT_DATE);
     }
 
     public static Integer createClient(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
@@ -91,6 +204,14 @@ public class ClientHelper {
         log.info("---------------------------------CREATING A CLIENT---------------------------------------------");
         return Utils.performServerPost(requestSpec, responseSpec, CREATE_CLIENT_URL, getTestClientAsJSON(activationDate, officeId),
                 "clientId");
+    }
+
+    public static PostClientsResponse createClient(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
+            final String activationDate, final String officeId, final String externalId) {
+        log.info("---------------------------------CREATING A CLIENT---------------------------------------------");
+        final String response = Utils.performServerPost(requestSpec, responseSpec, CREATE_CLIENT_URL,
+                getTestClientAsJSON(activationDate, officeId));
+        return GSON.fromJson(response, PostClientsResponse.class);
     }
 
     public static PostClientClientIdAddressesResponse createClientAddress(final RequestSpecification requestSpec,
@@ -133,7 +254,7 @@ public class ClientHelper {
     }
 
     public static Integer createClientAsPerson(final RequestSpecification requestSpec, final ResponseSpecification responseSpec) {
-        return createClientAsPerson(requestSpec, responseSpec, "04 March 2011");
+        return createClientAsPerson(requestSpec, responseSpec, DEFAULT_DATE);
     }
 
     public static Integer createClientAsPerson(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
@@ -146,12 +267,21 @@ public class ClientHelper {
 
         log.info(
                 "---------------------------------CREATING A CLIENT NON PERSON(ORGANISATION)---------------------------------------------");
-        return Utils.performServerPost(requestSpec, responseSpec, CREATE_CLIENT_URL, getTestPersonClientAsJSON(activationDate, officeId),
+        return Utils.performServerPost(requestSpec, responseSpec, CREATE_CLIENT_URL, getTestClientAsJSON(activationDate, officeId),
                 "clientId");
     }
 
+    public static PostClientsResponse createClientAsPersonWithDatatable(final RequestSpecification requestSpec,
+            final ResponseSpecification responseSpec, final String activationDate, final String officeId,
+            final HashMap<String, Object> datatables) {
+        log.info("---------------------------------CREATING A CLIENT PERSON WITH DATATABLE---------------------------------------------");
+        final String response = Utils.performServerPost(requestSpec, responseSpec, CREATE_CLIENT_URL,
+                getTestPersonClientAsJSON(activationDate, officeId, datatables), null);
+        return GSON.fromJson(response, PostClientsResponse.class);
+    }
+
     public static Integer createClientAsEntity(final RequestSpecification requestSpec, final ResponseSpecification responseSpec) {
-        return createClientAsEntity(requestSpec, responseSpec, "04 March 2011");
+        return createClientAsEntity(requestSpec, responseSpec, DEFAULT_DATE);
     }
 
     public static Integer createClientAsEntity(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
@@ -174,7 +304,7 @@ public class ClientHelper {
 
     public static Integer createClientForAccountPreference(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
             final Integer clientType, String jsonAttributeToGetBack) {
-        final String activationDate = "04 March 2011";
+        final String activationDate = DEFAULT_DATE;
         final String officeId = "1";
         log.info(
                 "---------------------------------CREATING A CLIENT BASED ON ACCOUNT PREFERENCE---------------------------------------------");
@@ -196,15 +326,35 @@ public class ClientHelper {
         return (Integer) getClient(requestSpec, responseSpec, clientId, "staffId");
     }
 
-    public static String getTestClientAsJSON(final String dateOfJoining, final String officeId) {
-        final HashMap<String, Object> map = new HashMap<>();
+    public static HashMap<String, Object> setInitialClientValues(final String officeId, final Long legalFormId) {
+        return setInitialClientValues(officeId, legalFormId, UUID.randomUUID().toString());
+    }
+
+    public static HashMap<String, Object> setInitialClientValues(final String officeId, final Long legalFormId, final String externalId) {
+        HashMap<String, Object> map = new HashMap<>();
         map.put("officeId", officeId);
-        map.put("legalFormId", LEGALFORM_ID_PERSON);
-        map.put("firstname", Utils.randomNameGenerator("Client_FirstName_", 5));
-        map.put("lastname", Utils.randomNameGenerator("Client_LastName_", 4));
-        map.put("externalId", randomIDGenerator("ID_", 7));
+        map.put("legalFormId", legalFormId);
+        map.put("firstname", Utils.randomStringGenerator("Client_FirstName_", 5));
+        map.put("lastname", Utils.randomStringGenerator("Client_LastName_", 4));
+        if (externalId != null) {
+            map.put("externalId", externalId);
+        }
         map.put("dateFormat", Utils.DATE_FORMAT);
         map.put("locale", "en");
+        return map;
+    }
+
+    public static String getBasicClientAsJSON(final String officeId, final Long legalFormId, final String externalId) {
+        HashMap<String, Object> map = setInitialClientValues(officeId, legalFormId, externalId);
+        map.put("active", "true");
+        map.put("activationDate", DEFAULT_DATE);
+        final String basicClientAsJson = GSON.toJson(map);
+        log.info("Client JSON :  {}", basicClientAsJson);
+        return basicClientAsJson;
+    }
+
+    public static String getTestClientAsJSON(final String dateOfJoining, final String officeId) {
+        HashMap<String, Object> map = setInitialClientValues(officeId, LEGALFORM_ID_PERSON);
         map.put("active", "true");
         map.put("activationDate", dateOfJoining);
         final String testClientAsJson = GSON.toJson(map);
@@ -213,14 +363,7 @@ public class ClientHelper {
     }
 
     public static String getTestClientAsJSONPending(final String submittedOnDate, final String officeId) {
-        final HashMap<String, Object> map = new HashMap<>();
-        map.put("officeId", officeId);
-        map.put("legalFormId", LEGALFORM_ID_PERSON);
-        map.put("firstname", Utils.randomNameGenerator("Client_FirstName_", 5));
-        map.put("lastname", Utils.randomNameGenerator("Client_LastName_", 4));
-        map.put("externalId", randomIDGenerator("ID_", 7));
-        map.put("dateFormat", Utils.DATE_FORMAT);
-        map.put("locale", "en");
+        HashMap<String, Object> map = setInitialClientValues(officeId, LEGALFORM_ID_PERSON);
         map.put("active", "false");
         map.put("submittedOnDate", submittedOnDate);
         log.info("map :  {}", map);
@@ -228,14 +371,7 @@ public class ClientHelper {
     }
 
     public static String getTestPendingClientWithDatatableAsJson(final String registeredTableName) {
-        final HashMap<String, Object> map = new HashMap<>();
-        map.put("officeId", "1");
-        map.put("legalFormId", LEGALFORM_ID_PERSON);
-        map.put("firstname", Utils.randomNameGenerator("Client_FirstName_", 5));
-        map.put("lastname", Utils.randomNameGenerator("Client_LastName_", 4));
-        map.put("externalId", randomIDGenerator("ID_", 7));
-        map.put("dateFormat", Utils.DATE_FORMAT);
-        map.put("locale", "en");
+        HashMap<String, Object> map = setInitialClientValues("1", LEGALFORM_ID_PERSON);
         map.put("active", "false");
         map.put("submittedOnDate", "04 March 2014");
         String requestJson = getTestDatatableAsJson(map, registeredTableName);
@@ -248,7 +384,7 @@ public class ClientHelper {
         HashMap<String, Object> datatableMap = new HashMap<>();
         HashMap<String, Object> dataMap = new HashMap<>();
         dataMap.put("locale", "en");
-        dataMap.put("Spouse Name", Utils.randomNameGenerator("Spouse_name", 4));
+        dataMap.put("Spouse Name", Utils.randomStringGenerator("Spouse_name", 4));
         dataMap.put("Number of Dependents", 5);
         dataMap.put("Time of Visit", "01 December 2016 04:03");
         dataMap.put("dateFormat", Utils.DATE_TIME_FORMAT);
@@ -263,8 +399,8 @@ public class ClientHelper {
     public static String getTestPersonClientAsJSON(final String dateOfJoining, final String officeId) {
         final HashMap<String, Object> map = new HashMap<>();
         map.put("officeId", officeId);
-        map.put("fullname", Utils.randomNameGenerator("Client_FullName_", 5));
-        map.put("externalId", randomIDGenerator("ID_", 7));
+        map.put("fullname", Utils.randomStringGenerator("Client_FullName_", 5));
+        map.put("externalId", UUID.randomUUID().toString());
         map.put("dateFormat", Utils.DATE_FORMAT);
         map.put("locale", "en");
         map.put("active", "true");
@@ -275,17 +411,36 @@ public class ClientHelper {
         return GSON.toJson(map);
     }
 
-    public static String getTestEntityClientAsJSON(final String dateOfJoining, final String officeId,
-            final Integer soleProprietorCodeValueId) {
+    public static String getTestPersonClientAsJSON(final String dateOfJoining, final String officeId,
+            final HashMap<String, Object> datatables) {
         final HashMap<String, Object> map = new HashMap<>();
         map.put("officeId", officeId);
-        map.put("fullname", Utils.randomNameGenerator("Client_FullName_", 5));
-        map.put("externalId", randomIDGenerator("ID_", 7));
+        map.put("fullname", Utils.randomStringGenerator("Client_FullName_", 5));
+        map.put("externalId", UUID.randomUUID().toString());
         map.put("dateFormat", Utils.DATE_FORMAT);
         map.put("locale", "en");
         map.put("active", "true");
         map.put("activationDate", dateOfJoining);
-        map.put("legalFormId", 2);
+        map.put("legalFormId", 1);
+        if (datatables != null) {
+            map.put("datatables", Arrays.asList(datatables));
+        }
+
+        log.info("map :  {}", map);
+        return GSON.toJson(map);
+    }
+
+    public static String getTestEntityClientAsJSON(final String dateOfJoining, final String officeId,
+            final Integer soleProprietorCodeValueId) {
+        final HashMap<String, Object> map = new HashMap<>();
+        map.put("officeId", officeId);
+        map.put("fullname", Utils.randomStringGenerator("Client_FullName_", 5));
+        map.put("externalId", UUID.randomUUID().toString());
+        map.put("dateFormat", Utils.DATE_FORMAT);
+        map.put("locale", "en");
+        map.put("active", "true");
+        map.put("activationDate", dateOfJoining);
+        map.put("legalFormId", LEGALFORM_ID_ENTITY);
 
         final HashMap<String, Object> clientNonPersonMap = new HashMap<>();
         clientNonPersonMap.put("constitutionId", soleProprietorCodeValueId);
@@ -296,14 +451,7 @@ public class ClientHelper {
     }
 
     public static String getTestClientWithClientTypeAsJSON(final String dateOfJoining, final String officeId, final String clientType) {
-        final HashMap<String, Object> map = new HashMap<>();
-        map.put("officeId", officeId);
-        map.put("legalFormId", LEGALFORM_ID_PERSON);
-        map.put("firstname", Utils.randomNameGenerator("Client_FirstName_", 5));
-        map.put("lastname", Utils.randomNameGenerator("Client_LastName_", 4));
-        map.put("externalId", randomIDGenerator("ID_", 7));
-        map.put("dateFormat", Utils.DATE_FORMAT);
-        map.put("locale", "en");
+        HashMap<String, Object> map = setInitialClientValues("1", LEGALFORM_ID_PERSON);
         map.put("active", "true");
         map.put("activationDate", dateOfJoining);
         map.put("clientTypeId", clientType);
@@ -330,6 +478,13 @@ public class ClientHelper {
             final int clientId) {
         String clientResponseStr = (String) getClient(requestSpec, responseSpec, Integer.toString(clientId), null);
         return GSON.fromJson(clientResponseStr, GetClientsClientIdResponse.class);
+    }
+
+    public static GetClientsClientIdResponse getClientByExternalId(final RequestSpecification requestSpec,
+            final ResponseSpecification responseSpec, final String externalId) {
+        final String url = CLIENT_EXTERNALID_URL + "/" + externalId + "?" + Utils.TENANT_IDENTIFIER;
+        final String response = Utils.performServerGet(requestSpec, responseSpec, url);
+        return GSON.fromJson(response, GetClientsClientIdResponse.class);
     }
 
     public static List<GetClientClientIdAddressesResponse> getClientAddresses(final RequestSpecification requestSpec,
@@ -361,11 +516,7 @@ public class ClientHelper {
         return (HashMap<String, Object>) getClient(requestSpec, responseSpec, clientId, "status");
     }
 
-    private static String randomIDGenerator(final String prefix, final int lenOfRandomSuffix) {
-        return Utils.randomStringGenerator(prefix, lenOfRandomSuffix, "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
-    }
-
-    private String getCloseClientAsJSON() {
+    public String getCloseClientAsJSON() {
         final HashMap<String, String> map = new HashMap<>();
 
         /* Retrieve Code id for the Code "ClientClosureReason" */
@@ -383,20 +534,18 @@ public class ClientHelper {
         map.put("closureDate", CREATED_DATE_PLUS_ONE);
 
         String clientJson = GSON.toJson(map);
-        log.info(clientJson);
+        log.info("{}", clientJson);
         return clientJson;
-
     }
 
-    private String getReactivateClientAsJSON() {
+    public String getReactivateClientAsJSON() {
         final HashMap<String, String> map = new HashMap<>();
         map.put("locale", CommonConstants.LOCALE);
         map.put("dateFormat", CommonConstants.DATE_FORMAT);
         map.put("reactivationDate", CREATED_DATE_PLUS_ONE);
         String clientJson = GSON.toJson(map);
-        log.info(clientJson);
+        log.info("{}", clientJson);
         return clientJson;
-
     }
 
     private String getUndoRejectClientAsJSON(final String date) {
@@ -405,7 +554,7 @@ public class ClientHelper {
         map.put("dateFormat", CommonConstants.DATE_FORMAT);
         map.put("reopenedDate", date);
         String clientJson = GSON.toJson(map);
-        log.info(clientJson);
+        log.info("{}", clientJson);
         return clientJson;
 
     }
@@ -416,12 +565,12 @@ public class ClientHelper {
         map.put("dateFormat", CommonConstants.DATE_FORMAT);
         map.put("reopenedDate", date);
         String clientJson = GSON.toJson(map);
-        log.info(clientJson);
+        log.info("{}", clientJson);
         return clientJson;
 
     }
 
-    private String getRejectClientAsJSON() {
+    public String getRejectClientAsJSON() {
         final HashMap<String, String> map = new HashMap<>();
         /* Retrieve Code id for the Code "ClientRejectReason" */
         String codeName = "ClientRejectReason";
@@ -438,18 +587,18 @@ public class ClientHelper {
         map.put("rejectionDate", CREATED_DATE_PLUS_ONE);
         map.put("rejectionReasonId", rejectionReasonId.toString());
         String clientJson = GSON.toJson(map);
-        log.info(clientJson);
+        log.info("{}", clientJson);
         return clientJson;
 
     }
 
-    private static String getActivateClientAsJSON(String date) {
+    public static String getActivateClientAsJSON(String date) {
         final HashMap<String, String> map = new HashMap<>();
         map.put("locale", CommonConstants.LOCALE);
         map.put("dateFormat", CommonConstants.DATE_FORMAT);
         map.put("activationDate", date);
         String clientJson = GSON.toJson(map);
-        log.info(clientJson);
+        log.info("{}", clientJson);
         return clientJson;
     }
 
@@ -472,7 +621,6 @@ public class ClientHelper {
         String clientJson = GSON.toJson(map);
         log.info(clientJson);
         return clientJson;
-
     }
 
     public static String getSpecifiedDueDateChargesClientAsJSON(final String chargeId, final String dueDate) {
@@ -492,6 +640,18 @@ public class ClientHelper {
         map.put("dateFormat", Utils.DATE_FORMAT);
         map.put("transactionDate", date);
         map.put("amount", amount);
+        String json = GSON.toJson(map);
+        log.info("{}", json);
+        return json;
+    }
+
+    public static String getPayChargeJSONWithExternalId(final String date, String amount, String externalId) {
+        final HashMap<String, String> map = new HashMap<>();
+        map.put("locale", "en_GB");
+        map.put("dateFormat", Utils.DATE_FORMAT);
+        map.put("transactionDate", date);
+        map.put("amount", amount);
+        map.put("externalId", externalId);
         String json = GSON.toJson(map);
         log.info("{}", json);
         return json;
@@ -587,6 +747,13 @@ public class ClientHelper {
         return response;
     }
 
+    public static PostClientsClientIdResponse performClientActionUsingExternalId(final RequestSpecification requestSpec,
+            final ResponseSpecification responseSpec, final String externalId, final String command, final String jsonPayload) {
+        final String url = CLIENT_EXTERNALID_URL + "/" + externalId + "?" + Utils.TENANT_IDENTIFIER + "&command=" + command;
+        final String response = Utils.performServerPost(requestSpec, responseSpec, url, jsonPayload);
+        return GSON.fromJson(response, PostClientsClientIdResponse.class);
+    }
+
     public static Integer addChargesForClient(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
             final Integer clientId, final String request) {
         log.info("--------------------------------- ADD CHARGES FOR Client --------------------------------");
@@ -602,6 +769,15 @@ public class ClientHelper {
                 + Utils.TENANT_IDENTIFIER;
         final HashMap<?, ?> response = Utils.performServerPost(requestSpec, responseSpec, CHARGES_URL, json, "");
         return response.get("transactionId") != null ? response.get("transactionId").toString() : null;
+    }
+
+    public static String payChargesForClientsTransactionExternalId(final RequestSpecification requestSpec,
+            final ResponseSpecification responseSpec, final Integer clientId, final Integer clientChargeId, final String json) {
+        log.info("--------------------------------- PAY CHARGES FOR CLIENT --------------------------------");
+        final String CHARGES_URL = "/fineract-provider/api/v1/clients/" + clientId + "/charges/" + clientChargeId + "?command=paycharge&"
+                + Utils.TENANT_IDENTIFIER;
+        final HashMap<?, ?> response = Utils.performServerPost(requestSpec, responseSpec, CHARGES_URL, json, "");
+        return response.get("subResourceExternalId") != null ? response.get("subResourceExternalId").toString() : null;
     }
 
     public static String waiveChargesForClients(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
@@ -641,6 +817,30 @@ public class ClientHelper {
         return Utils.performServerGet(requestSpec, responseSpec, CHARGES_URL, "reversed");
     }
 
+    public GetClientsClientIdTransactionsResponse getAllClientTransactionsByExternalId(final String externalId) {
+        return ok(fineract().clientTransactions.retrieveAllClientTransactions1(externalId, 0, 100));
+    }
+
+    public GetClientsClientIdTransactionsTransactionIdResponse getClientTransactionByExternalId(final String externalId,
+            final String transactionId) {
+        return ok(fineract().clientTransactions.retrieveClientTransaction2(externalId, Long.parseLong(transactionId)));
+    }
+
+    public GetClientsClientIdTransactionsTransactionIdResponse getClientTransactionByTransactionExternalId(final Long clientId,
+            final String transactionExternalId) {
+        return ok(fineract().clientTransactions.retrieveClientTransaction1(clientId, transactionExternalId));
+    }
+
+    public PostClientsClientIdTransactionsTransactionIdResponse undoClientTransactionByExternalId(final String externalId,
+            final String transactionId) {
+        return ok(fineract().clientTransactions.undoClientTransaction2(externalId, Long.parseLong(transactionId), "undo"));
+    }
+
+    public PostClientsClientIdTransactionsTransactionIdResponse undoClientTransactionByTransactionExternalId(final Long clientId,
+            final String transactionExternalId) {
+        return ok(fineract().clientTransactions.undoClientTransaction1(clientId, transactionExternalId, "undo"));
+    }
+
     public Workbook getClientEntityWorkbook(GlobalEntityType clientsEntity, String dateFormat) throws IOException {
         requestSpec.header(HttpHeaders.CONTENT_TYPE, "application/vnd.ms-excel");
         byte[] byteArray = Utils.performGetBinaryResponse(requestSpec, responseSpec, CLIENT_URL + "/downloadtemplate" + "?"
@@ -659,7 +859,7 @@ public class ClientHelper {
     public String importClientEntityTemplate(File file) {
         String locale = "en";
         String dateFormat = "dd MMMM yyyy";
-        String legalFormType = GlobalEntityType.CLIENTS_ENTTTY.toString();
+        String legalFormType = GlobalEntityType.CLIENTS_ENTITY.toString();
         requestSpec.header(HttpHeaders.CONTENT_TYPE, MediaType.MULTIPART_FORM_DATA);
         return Utils.performServerTemplatePost(requestSpec, responseSpec, CLIENT_URL + "/uploadtemplate" + "?" + Utils.TENANT_IDENTIFIER,
                 legalFormType, file, locale, dateFormat);
@@ -673,9 +873,19 @@ public class ClientHelper {
     }
 
     public static PostClientsRequest defaultClientCreationRequest() {
-        return new PostClientsRequest().officeId(1).legalFormId(LEGALFORM_ID_PERSON)
-                .firstname(Utils.randomNameGenerator("Client_FirstName_", 5)).lastname(Utils.randomNameGenerator("Client_LastName_", 5))
-                .externalId(randomIDGenerator("ID_", 7)).dateFormat(Utils.DATE_FORMAT).locale("en").active(true)
-                .activationDate("04 March 2011");
+        return new PostClientsRequest().officeId(1L).legalFormId(LEGALFORM_ID_PERSON)
+                .firstname(Utils.randomStringGenerator("Client_FirstName_", 5)).lastname(Utils.randomStringGenerator("Client_LastName_", 5))
+                .externalId(UUID.randomUUID().toString()).dateFormat(Utils.DATE_FORMAT).locale("en").active(true)
+                .activationDate(DEFAULT_DATE);
     }
+
+    public GetLoanAccountLockResponse retrieveLockedAccounts(int page, int limit) {
+        return ok(fineract().loanAccountLockApi.retrieveLockedAccounts(page, limit));
+    }
+
+    public static PostClientsClientIdIdentifiersRequest createClientIdentifer(final Long documentType) {
+        return new PostClientsClientIdIdentifiersRequest().documentTypeId(documentType).documentKey(Utils.randomStringGenerator("ID_", 10))
+                .description(Utils.randomStringGenerator("Desc_", 50)).status("Active");
+    }
+
 }

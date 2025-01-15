@@ -54,11 +54,30 @@ public class HolidayHelper {
         map.put("offices", offices);
         map.put("locale", "en");
         map.put("dateFormat", "dd MMMM yyyy");
-        map.put("name", Utils.randomNameGenerator("HOLIDAY_", 5));
+        map.put("name", Utils.uniqueRandomStringGenerator("HOLIDAY_", 5));
         map.put("fromDate", "01 April 2013");
         map.put("toDate", "01 April 2013");
         map.put("repaymentsRescheduledTo", "08 April 2013");
         map.put("reschedulingType", 2);
+        String HolidayCreateJson = new Gson().toJson(map);
+        LOG.info("{}", HolidayCreateJson);
+        return HolidayCreateJson;
+    }
+
+    public static String getCreateType1HolidayDataAsJSON() {
+        final HashMap<String, Object> map = new HashMap<>();
+        List<HashMap<String, String>> offices = new ArrayList<HashMap<String, String>>();
+        HashMap<String, String> officeMap = new HashMap<>();
+        officeMap.put("officeId", OFFICE_ID);
+        offices.add(officeMap);
+
+        map.put("offices", offices);
+        map.put("locale", "en");
+        map.put("dateFormat", "dd MMMM yyyy");
+        map.put("name", Utils.uniqueRandomStringGenerator("HOLIDAY_", 5));
+        map.put("fromDate", "04 April 2024");
+        map.put("toDate", "04 April 2024");
+        map.put("reschedulingType", 1);
         String HolidayCreateJson = new Gson().toJson(map);
         LOG.info("{}", HolidayCreateJson);
         return HolidayCreateJson;
@@ -75,6 +94,10 @@ public class HolidayHelper {
         return Utils.performServerPost(requestSpec, responseSpec, CREATE_HOLIDAY_URL, getCreateHolidayDataAsJSON(), "resourceId");
     }
 
+    public static Integer createTyoe1Holidays(final RequestSpecification requestSpec, final ResponseSpecification responseSpec) {
+        return Utils.performServerPost(requestSpec, responseSpec, CREATE_HOLIDAY_URL, getCreateType1HolidayDataAsJSON(), "resourceId");
+    }
+
     public static Integer activateHolidays(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
             final String holidayID) {
         final String ACTIVATE_HOLIDAY_URL = HOLIDAYS_URL + "/" + holidayID + "?command=activate&" + Utils.TENANT_IDENTIFIER;
@@ -87,6 +110,12 @@ public class HolidayHelper {
         LOG.info("------------------------ RETRIEVING HOLIDAY BY ID -------------------------");
         final HashMap response = Utils.performServerGet(requestSpec, responseSpec, GET_HOLIDAY_BY_ID_URL, "");
         return response;
+    }
+
+    public static Integer deleteHoliday(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
+            final Integer holidayID) {
+        final String DELETE_HOLIDAY_URL = HOLIDAYS_URL + "/" + holidayID + "?" + Utils.TENANT_IDENTIFIER;
+        return Utils.performServerDelete(requestSpec, responseSpec, DELETE_HOLIDAY_URL, "{}", "resourceId");
     }
 
 }

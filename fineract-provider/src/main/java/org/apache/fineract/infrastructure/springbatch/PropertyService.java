@@ -23,4 +23,14 @@ public interface PropertyService {
     Integer getPartitionSize(String jobName);
 
     Integer getChunkSize(String jobName);
+
+    Integer getRetryLimit(String jobName);
+
+    Integer getThreadPoolCorePoolSize(String jobName);
+
+    Integer getThreadPoolMaxPoolSize(String jobName);
+
+    Integer getThreadPoolQueueCapacity(String jobName);
+
+    Integer getPollInterval(String jobName);
 }

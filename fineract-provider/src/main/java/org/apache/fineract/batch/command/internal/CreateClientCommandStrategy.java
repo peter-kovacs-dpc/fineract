@@ -18,12 +18,13 @@
  */
 package org.apache.fineract.batch.command.internal;
 
-import javax.ws.rs.core.UriInfo;
+import jakarta.ws.rs.core.UriInfo;
 import lombok.RequiredArgsConstructor;
 import org.apache.fineract.batch.command.CommandStrategy;
 import org.apache.fineract.batch.domain.BatchRequest;
 import org.apache.fineract.batch.domain.BatchResponse;
 import org.apache.fineract.portfolio.client.api.ClientsApiResource;
+import org.apache.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 /**
@@ -58,7 +59,7 @@ public class CreateClientCommandStrategy implements CommandStrategy {
         // client
         responseBody = clientsApiResource.create(request.getBody());
 
-        response.setStatusCode(200);
+        response.setStatusCode(HttpStatus.SC_OK);
         // Sets the body of the response after the successful creation of
         // the client
         response.setBody(responseBody);

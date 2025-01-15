@@ -25,19 +25,19 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.UriInfo;
 import java.util.HashSet;
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.PUT;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.UriInfo;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.commands.domain.CommandWrapper;
@@ -58,12 +58,11 @@ import org.apache.fineract.infrastructure.core.serialization.FromJsonHelper;
 import org.apache.fineract.infrastructure.core.service.Page;
 import org.apache.fineract.infrastructure.core.service.SearchParameters;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
-import org.springframework.context.annotation.Scope;
+import org.apache.fineract.infrastructure.security.service.SqlValidator;
 import org.springframework.stereotype.Component;
 
-@Path("/smscampaigns")
+@Path("/v1/smscampaigns")
 @Component
-@Scope("singleton")
 @RequiredArgsConstructor
 public class SmsCampaignApiResource {
 
@@ -76,6 +75,7 @@ public class SmsCampaignApiResource {
     private final DefaultToApiJsonSerializer<CampaignPreviewData> previewCampaignMessageDefaultToApiJsonSerializer;
     private final SmsCampaignWritePlatformService smsCampaignWritePlatformService;
     private final PlatformSecurityContext context;
+    private final SqlValidator sqlValidator;
 
     private static final String RESOURCE_NAME_FOR_PERMISSIONS = "SMS_CAMPAIGN";
 
@@ -141,11 +141,13 @@ public class SmsCampaignApiResource {
 
             smscampaigns""")
     @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = SmsCampaignData.class)))
-    public String retrieveAllEmails(@QueryParam("sqlSearch") final String sqlSearch, @QueryParam("offset") final Integer offset,
-            @QueryParam("limit") final Integer limit, @QueryParam("orderBy") final String orderBy,
-            @QueryParam("sortOrder") final String sortOrder, @Context final UriInfo uriInfo) {
+    public String retrieveAllEmails(@QueryParam("offset") final Integer offset, @QueryParam("limit") final Integer limit,
+            @QueryParam("orderBy") final String orderBy, @QueryParam("sortOrder") final String sortOrder, @Context final UriInfo uriInfo) {
         platformSecurityContext.authenticatedUser().validateHasReadPermission(SmsCampaignConstants.RESOURCE_NAME);
-        final SearchParameters searchParameters = SearchParameters.forSMSCampaign(sqlSearch, offset, limit, orderBy, sortOrder);
+        sqlValidator.validate(orderBy);
+        sqlValidator.validate(sortOrder);
+        final SearchParameters searchParameters = SearchParameters.builder().limit(limit).offset(offset).orderBy(orderBy)
+                .sortOrder(sortOrder).build();
         Page<SmsCampaignData> smsCampaignDataCollection = smsCampaignReadPlatformService.retrieveAll(searchParameters);
         final ApiRequestJsonSerializationSettings settings = apiRequestParameterHelper.process(uriInfo.getQueryParameters());
         return toApiJsonSerializer.serialize(settings, smsCampaignDataCollection);

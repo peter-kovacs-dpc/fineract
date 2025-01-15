@@ -27,6 +27,20 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.DefaultValue;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import java.io.InputStream;
 import java.time.LocalDate;
 import java.util.Arrays;
@@ -34,22 +48,8 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.DefaultValue;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.PUT;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriInfo;
+import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.fineract.accounting.journalentry.api.DateParam;
 import org.apache.fineract.commands.domain.CommandWrapper;
 import org.apache.fineract.commands.service.CommandWrapperBuilder;
 import org.apache.fineract.commands.service.PortfolioCommandSourceWritePlatformService;
@@ -58,8 +58,10 @@ import org.apache.fineract.infrastructure.bulkimport.service.BulkImportWorkbookP
 import org.apache.fineract.infrastructure.bulkimport.service.BulkImportWorkbookService;
 import org.apache.fineract.infrastructure.core.api.ApiParameterHelper;
 import org.apache.fineract.infrastructure.core.api.ApiRequestParameterHelper;
+import org.apache.fineract.infrastructure.core.api.DateParam;
 import org.apache.fineract.infrastructure.core.api.JsonQuery;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
+import org.apache.fineract.infrastructure.core.data.DateFormat;
 import org.apache.fineract.infrastructure.core.data.PaginationParameters;
 import org.apache.fineract.infrastructure.core.data.UploadRequest;
 import org.apache.fineract.infrastructure.core.exception.UnrecognizedQueryParamException;
@@ -73,6 +75,7 @@ import org.apache.fineract.infrastructure.dataqueries.data.EntityTables;
 import org.apache.fineract.infrastructure.dataqueries.data.StatusEnum;
 import org.apache.fineract.infrastructure.dataqueries.service.EntityDatatableChecksReadService;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
+import org.apache.fineract.infrastructure.security.service.SqlValidator;
 import org.apache.fineract.portfolio.accountdetails.data.AccountSummaryCollectionData;
 import org.apache.fineract.portfolio.accountdetails.service.AccountDetailsReadPlatformService;
 import org.apache.fineract.portfolio.calendar.data.CalendarData;
@@ -88,14 +91,12 @@ import org.apache.fineract.portfolio.meeting.data.MeetingData;
 import org.apache.fineract.portfolio.meeting.service.MeetingReadPlatformService;
 import org.glassfish.jersey.media.multipart.FormDataContentDisposition;
 import org.glassfish.jersey.media.multipart.FormDataParam;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Component;
 
-@Path("/centers")
+@Path("/v1/centers")
 @Component
-@Scope("singleton")
 @Tag(name = "Centers", description = "Centers along with Groups are used to provided a distinctive banking distribution channel used in microfinance. Its common in areas such as Southern Asia to use Centers and Group as administrative units in grameen style lending. Typically groups will contain one to five people and centers themselves will be made of anywhere between 2-10 groups.")
+@RequiredArgsConstructor
 public class CentersApiResource {
 
     private final PlatformSecurityContext context;
@@ -113,35 +114,7 @@ public class CentersApiResource {
     private final EntityDatatableChecksReadService entityDatatableChecksReadService;
     private final BulkImportWorkbookService bulkImportWorkbookService;
     private final BulkImportWorkbookPopulatorService bulkImportWorkbookPopulatorService;
-
-    @Autowired
-    public CentersApiResource(final PlatformSecurityContext context, final CenterReadPlatformService centerReadPlatformService,
-            final ToApiJsonSerializer<CenterData> centerApiJsonSerializer, final ToApiJsonSerializer<Object> toApiJsonSerializer,
-            final ToApiJsonSerializer<AccountSummaryCollectionData> groupSummaryToApiJsonSerializer,
-            final ApiRequestParameterHelper apiRequestParameterHelper,
-            final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService,
-            final CollectionSheetReadPlatformService collectionSheetReadPlatformService, final FromJsonHelper fromJsonHelper,
-            final AccountDetailsReadPlatformService accountDetailsReadPlatformService,
-            final CalendarReadPlatformService calendarReadPlatformService, final MeetingReadPlatformService meetingReadPlatformService,
-            final EntityDatatableChecksReadService entityDatatableChecksReadService,
-            final BulkImportWorkbookService bulkImportWorkbookService,
-            final BulkImportWorkbookPopulatorService bulkImportWorkbookPopulatorService) {
-        this.context = context;
-        this.centerReadPlatformService = centerReadPlatformService;
-        this.centerApiJsonSerializer = centerApiJsonSerializer;
-        this.toApiJsonSerializer = toApiJsonSerializer;
-        this.groupSummaryToApiJsonSerializer = groupSummaryToApiJsonSerializer;
-        this.apiRequestParameterHelper = apiRequestParameterHelper;
-        this.commandsSourceWritePlatformService = commandsSourceWritePlatformService;
-        this.collectionSheetReadPlatformService = collectionSheetReadPlatformService;
-        this.fromJsonHelper = fromJsonHelper;
-        this.accountDetailsReadPlatformService = accountDetailsReadPlatformService;
-        this.calendarReadPlatformService = calendarReadPlatformService;
-        this.meetingReadPlatformService = meetingReadPlatformService;
-        this.entityDatatableChecksReadService = entityDatatableChecksReadService;
-        this.bulkImportWorkbookPopulatorService = bulkImportWorkbookPopulatorService;
-        this.bulkImportWorkbookService = bulkImportWorkbookService;
-    }
+    private final SqlValidator sqlValidator;
 
     @GET
     @Path("template")
@@ -166,8 +139,8 @@ public class CentersApiResource {
         }
 
         final CenterData template = this.centerReadPlatformService.retrieveTemplate(officeId, staffInSelectedOfficeOnly);
-        final List<DatatableData> datatableTemplates = this.entityDatatableChecksReadService
-                .retrieveTemplates(StatusEnum.CREATE.getCode().longValue(), EntityTables.GROUP.getName(), null);
+        final List<DatatableData> datatableTemplates = this.entityDatatableChecksReadService.retrieveTemplates(StatusEnum.CREATE.getValue(),
+                EntityTables.GROUP.getName(), null);
         template.setDatatables(datatableTemplates);
 
         final ApiRequestJsonSerializationSettings settings = this.apiRequestParameterHelper.process(uriInfo.getQueryParameters());
@@ -200,16 +173,20 @@ public class CentersApiResource {
         this.context.authenticatedUser().validateHasReadPermission(GroupingTypesApiConstants.CENTER_RESOURCE_NAME);
         final ApiRequestJsonSerializationSettings settings = this.apiRequestParameterHelper.process(uriInfo.getQueryParameters());
         if (meetingDateParam != null && officeId != null) {
-            LocalDate meetingDate = meetingDateParam.getDate("meetingDate", dateFormat, locale);
+            LocalDate meetingDate = meetingDateParam.getDate("meetingDate", new DateFormat(dateFormat), locale);
             Collection<StaffCenterData> staffCenterDataArray = this.centerReadPlatformService.retriveAllCentersByMeetingDate(officeId,
                     meetingDate, staffId);
             return this.toApiJsonSerializer.serialize(settings, staffCenterDataArray,
                     GroupingTypesApiConstants.STAFF_CENTER_RESPONSE_DATA_PARAMETERS);
         }
-        final PaginationParameters parameters = PaginationParameters.instance(paged, offset, limit, orderBy, sortOrder);
-        final Boolean isOrphansOnly = false;
-        final SearchParameters searchParameters = SearchParameters.forGroups(officeId, staffId, externalId, name, hierarchy, offset, limit,
-                orderBy, sortOrder, isOrphansOnly);
+        sqlValidator.validate(orderBy);
+        sqlValidator.validate(sortOrder);
+        sqlValidator.validate(externalId);
+        sqlValidator.validate(hierarchy);
+        final PaginationParameters parameters = PaginationParameters.builder().paged(Boolean.TRUE.equals(paged)).limit(limit).offset(offset)
+                .orderBy(orderBy).sortOrder(sortOrder).build();
+        final SearchParameters searchParameters = SearchParameters.builder().limit(limit).officeId(officeId).externalId(externalId)
+                .name(name).hierarchy(hierarchy).offset(offset).orderBy(orderBy).sortOrder(sortOrder).staffId(staffId).build();
         if (parameters.isPaged()) {
             final Page<CenterData> centers = this.centerReadPlatformService.retrievePagedAll(searchParameters, parameters);
             return this.toApiJsonSerializer.serialize(settings, centers, GroupingTypesApiConstants.CENTER_RESPONSE_DATA_PARAMETERS);

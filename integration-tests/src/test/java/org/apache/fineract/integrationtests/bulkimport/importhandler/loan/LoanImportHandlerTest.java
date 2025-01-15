@@ -25,6 +25,8 @@ import io.restassured.http.ContentType;
 import io.restassured.path.json.JsonPath;
 import io.restassured.specification.RequestSpecification;
 import io.restassured.specification.ResponseSpecification;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.MediaType;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -38,8 +40,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.MediaType;
+import java.util.UUID;
+import org.apache.fineract.client.models.PostPaymentTypesRequest;
+import org.apache.fineract.client.models.PostPaymentTypesResponse;
 import org.apache.fineract.infrastructure.bulkimport.constants.LoanConstants;
 import org.apache.fineract.infrastructure.bulkimport.constants.TemplatePopulateImportConstants;
 import org.apache.fineract.integrationtests.common.CollateralManagementHelper;
@@ -74,6 +77,7 @@ public class LoanImportHandlerTest {
 
     private ResponseSpecification responseSpec;
     private RequestSpecification requestSpec;
+    private PaymentTypeHelper paymentTypeHelper;
 
     @BeforeEach
     public void setup() {
@@ -81,6 +85,7 @@ public class LoanImportHandlerTest {
         this.requestSpec = new RequestSpecBuilder().setContentType(ContentType.JSON).build();
         this.requestSpec.header("Authorization", "Basic " + Utils.loginIntoServerAndGetBase64EncodedAuthenticationKey());
         this.responseSpec = new ResponseSpecBuilder().expectStatusCode(200).build();
+        this.paymentTypeHelper = new PaymentTypeHelper();
     }
 
     @Test
@@ -95,9 +100,9 @@ public class LoanImportHandlerTest {
         OfficeDomain office = officeHelper.retrieveOfficeByID(outcome_office_creation);
         Assertions.assertNotNull(office, "Could not retrieve created office");
 
-        String firstName = Utils.randomNameGenerator("Client_FirstName_", 5);
-        String lastName = Utils.randomNameGenerator("Client_LastName_", 4);
-        String externalId = Utils.randomStringGenerator("ID_", 7, "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        String firstName = Utils.randomStringGenerator("Client_FirstName_", 5);
+        String lastName = Utils.randomStringGenerator("Client_LastName_", 4);
+        String externalId = UUID.randomUUID().toString();
 
         final HashMap<String, Object> clientMap = new HashMap<>();
         clientMap.put("officeId", outcome_office_creation.toString());
@@ -154,15 +159,18 @@ public class LoanImportHandlerTest {
         Assertions.assertNotNull("Could not get created Loan Product", loanProductStr);
         JsonPath loanProductJson = JsonPath.from(loanProductStr);
 
-        String fundName = Utils.randomNameGenerator("", 9);
-        FundsHelper fh = FundsHelper.create(fundName).externalId("fund-" + fundName).build();
+        String fundName = Utils.uniqueRandomStringGenerator("", 9);
+        FundsHelper fh = FundsHelper.create(fundName).externalId(UUID.randomUUID().toString()).build();
         Integer outcome_fund_creation = FundsResourceHandler.createFund(new Gson().toJson(fh), requestSpec, responseSpec);
         Assertions.assertNotNull(outcome_fund_creation, "Could not create Fund");
 
         String paymentTypeName = PaymentTypeHelper.randomNameGenerator("P_T", 5);
         String paymentTypeDescription = PaymentTypeHelper.randomNameGenerator("PT_Desc", 15);
-        Integer outcome_payment_creation = PaymentTypeHelper.createPaymentType(requestSpec, responseSpec, paymentTypeName,
-                paymentTypeDescription, true, 1);
+
+        PostPaymentTypesResponse paymentTypesResponse = paymentTypeHelper.createPaymentType(
+                new PostPaymentTypesRequest().name(paymentTypeName).description(paymentTypeDescription).isCashPayment(true).position(1));
+        Long outcome_payment_creation = paymentTypesResponse.getResourceId();
+
         Assertions.assertNotNull(outcome_payment_creation, "Could not create payment type");
 
         LoanTransactionHelper loanTransactionHelper = new LoanTransactionHelper(requestSpec, responseSpec);
@@ -217,8 +225,7 @@ public class LoanImportHandlerTest {
         firstLoanRow.createCell(LoanConstants.LOAN_COLLATERAL_QUANTITY).setCellValue(collaterals.get(0).get("quantity").toString());
         firstLoanRow.createCell(LoanConstants.CHARGE_NAME_1).setCellValue(disbursementChargeJSON.getString("name"));
         firstLoanRow.createCell(LoanConstants.CHARGE_AMOUNT_1).setCellValue(disbursementChargeJSON.getFloat("amount"));
-        firstLoanRow.createCell(LoanConstants.CHARGE_AMOUNT_TYPE_1)
-                .setCellValue(disbursementChargeJSON.getString("chargeCalculationType.value"));
+        firstLoanRow.createCell(LoanConstants.CHARGE_AMOUNT_TYPE_1).setCellValue(disbursementChargeJSON.getString("chargeCalculationType"));
 
         String currentdirectory = new File("").getAbsolutePath();
         File directory = new File(currentdirectory + File.separator + "src" + File.separator + "integrationTest" + File.separator

@@ -18,23 +18,32 @@
  */
 package org.apache.fineract.infrastructure.entityaccess.domain;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.JoinColumn;
-import javax.persistence.ManyToOne;
-import javax.persistence.Table;
-import javax.persistence.UniqueConstraint;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import lombok.experimental.Accessors;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.domain.AbstractPersistableCustom;
+import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.infrastructure.entityaccess.api.FineractEntityApiResourceConstants;
 import org.apache.fineract.infrastructure.entityaccess.exception.FineractEntityToEntityMappingDateException;
 
 @Entity
 @Table(name = "m_entity_to_entity_mapping", uniqueConstraints = { @UniqueConstraint(columnNames = { "rel_id", "from_id", "to_id" }) })
-public class FineractEntityToEntityMapping extends AbstractPersistableCustom {
+@Getter
+@Setter
+@NoArgsConstructor
+@Accessors(chain = true)
+public class FineractEntityToEntityMapping extends AbstractPersistableCustom<Long> {
 
     @ManyToOne
     @JoinColumn(name = "rel_id")
@@ -52,29 +61,15 @@ public class FineractEntityToEntityMapping extends AbstractPersistableCustom {
     @Column(name = "end_date", nullable = true)
     private LocalDate endDate;
 
-    private FineractEntityToEntityMapping(final FineractEntityRelation relationId, final Long fromId, final Long toId,
-            final LocalDate startDate, final LocalDate endDate) {
-        this.relationId = relationId;
-        this.fromId = fromId;
-        this.toId = toId;
-        this.startDate = startDate;
-        this.endDate = endDate;
-
-    }
-
-    public FineractEntityToEntityMapping() {
-        //
-    }
-
     public static FineractEntityToEntityMapping newMap(FineractEntityRelation relationId, Long fromId, Long toId, LocalDate startDate,
             LocalDate endDate) {
 
-        return new FineractEntityToEntityMapping(relationId, fromId, toId, startDate, endDate);
+        return new FineractEntityToEntityMapping().setRelationId(relationId).setFromId(fromId).setToId(toId).setStartDate(startDate)
+                .setEndDate(endDate);
 
     }
 
     public Map<String, Object> updateMap(final JsonCommand command) {
-
         final Map<String, Object> actualChanges = new LinkedHashMap<>(9);
 
         if (command.isChangeInLongParameterNamed(FineractEntityApiResourceConstants.fromEnityType, this.fromId)) {
@@ -100,22 +95,12 @@ public class FineractEntityToEntityMapping extends AbstractPersistableCustom {
             actualChanges.put(FineractEntityApiResourceConstants.endDate, valueAsInput);
             this.endDate = command.localDateValueOfParameterNamed(FineractEntityApiResourceConstants.endDate);
         }
-        if (startDate != null && endDate != null) {
-            if (endDate.isBefore(startDate)) {
-                throw new FineractEntityToEntityMappingDateException(startDate.toString(), endDate.toString());
-            }
+        if (endDate != null && DateUtils.isBefore(endDate, startDate)) {
+            throw new FineractEntityToEntityMappingDateException(startDate.toString(), endDate.toString());
         }
 
         return actualChanges;
 
-    }
-
-    public FineractEntityRelation getRelationId() {
-        return this.relationId;
-    }
-
-    public void setRelationId(FineractEntityRelation relationId) {
-        this.relationId = relationId;
     }
 
     /*

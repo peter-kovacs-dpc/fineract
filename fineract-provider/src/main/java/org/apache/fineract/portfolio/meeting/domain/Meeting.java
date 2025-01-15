@@ -23,21 +23,21 @@ import static org.apache.fineract.portfolio.meeting.MeetingApiConstants.clientId
 import static org.apache.fineract.portfolio.meeting.MeetingApiConstants.clientsAttendanceParamName;
 import static org.apache.fineract.portfolio.meeting.MeetingApiConstants.meetingDateParamName;
 
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
-import javax.persistence.CascadeType;
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.FetchType;
-import javax.persistence.JoinColumn;
-import javax.persistence.ManyToOne;
-import javax.persistence.OneToMany;
-import javax.persistence.Table;
-import javax.persistence.UniqueConstraint;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.domain.AbstractPersistableCustom;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
@@ -51,7 +51,7 @@ import org.apache.fineract.portfolio.meeting.exception.MeetingDateException;
 @Entity
 @Table(name = "m_meeting", uniqueConstraints = {
         @UniqueConstraint(columnNames = { "calendar_instance_id", "meeting_date" }, name = "unique_calendar_instance_id_meeting_date") })
-public class Meeting extends AbstractPersistableCustom {
+public class Meeting extends AbstractPersistableCustom<Long> {
 
     @ManyToOne
     @JoinColumn(name = "calendar_instance_id", nullable = false)
@@ -167,7 +167,7 @@ public class Meeting extends AbstractPersistableCustom {
     }
 
     public boolean isMeetingDateBefore(final LocalDate newStartDate) {
-        return this.meetingDate != null && newStartDate != null && getMeetingDateLocalDate().isBefore(newStartDate) ? true : false;
+        return this.meetingDate != null && DateUtils.isBefore(getMeetingDateLocalDate(), newStartDate);
     }
 
     private static boolean isValidMeetingDate(final CalendarInstance calendarInstance, final LocalDate meetingDate,
@@ -181,7 +181,7 @@ public class Meeting extends AbstractPersistableCustom {
     }
 
     private boolean isMeetingDateAfter(final LocalDate date) {
-        return getMeetingDateLocalDate().isAfter(date);
+        return DateUtils.isAfter(getMeetingDateLocalDate(), date);
     }
 
     public Collection<ClientAttendance> getClientsAttendance() {

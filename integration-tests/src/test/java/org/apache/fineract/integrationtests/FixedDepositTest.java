@@ -18,20 +18,25 @@
  */
 package org.apache.fineract.integrationtests;
 
+import static java.time.temporal.ChronoUnit.DAYS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import com.google.common.truth.Truth;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import io.restassured.builder.RequestSpecBuilder;
 import io.restassured.builder.ResponseSpecBuilder;
 import io.restassured.http.ContentType;
 import io.restassured.specification.RequestSpecification;
 import io.restassured.specification.ResponseSpecification;
 import java.math.BigDecimal;
+import java.math.MathContext;
 import java.math.RoundingMode;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.time.LocalDate;
-import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.temporal.ChronoUnit;
@@ -44,6 +49,9 @@ import java.util.Locale;
 import java.util.TimeZone;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.accounting.common.AccountingConstants.FinancialActivity;
+import org.apache.fineract.infrastructure.core.api.JsonQuery;
+import org.apache.fineract.infrastructure.core.exception.PlatformApiDataValidationException;
+import org.apache.fineract.infrastructure.core.serialization.FromJsonHelper;
 import org.apache.fineract.integrationtests.common.ClientHelper;
 import org.apache.fineract.integrationtests.common.CommonConstants;
 import org.apache.fineract.integrationtests.common.SchedulerJobHelper;
@@ -62,10 +70,15 @@ import org.apache.fineract.integrationtests.common.fixeddeposit.FixedDepositProd
 import org.apache.fineract.integrationtests.common.savings.SavingsAccountHelper;
 import org.apache.fineract.integrationtests.common.savings.SavingsProductHelper;
 import org.apache.fineract.integrationtests.common.savings.SavingsStatusChecker;
+import org.apache.fineract.organisation.monetary.domain.MoneyHelper;
+import org.apache.fineract.portfolio.savings.data.DepositAccountDataValidator;
+import org.apache.fineract.portfolio.savings.service.FixedDepositAccountInterestCalculationServiceImpl;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 
 @Slf4j
 @SuppressWarnings({ "unused", "unchecked", "rawtypes", "static-access" })
@@ -79,6 +92,8 @@ public class FixedDepositTest {
     private SavingsAccountHelper savingsAccountHelper;
     private JournalEntryHelper journalEntryHelper;
     private FinancialActivityAccountHelper financialActivityAccountHelper;
+
+    private FixedDepositAccountInterestCalculationServiceImpl fixedDepositAccountInterestCalculationServiceImpl;
 
     public static final String WHOLE_TERM = "1";
     public static final String TILL_PREMATURE_WITHDRAWAL = "2";
@@ -114,7 +129,7 @@ public class FixedDepositTest {
     // and then to compare the exact results
     public static final Float THRESHOLD = 1.0f;
 
-    private TimeZone systemTimeZone;
+    private MockedStatic<MoneyHelper> moneyHelperStatic;
 
     @BeforeEach
     public void setup() {
@@ -125,8 +140,84 @@ public class FixedDepositTest {
         this.responseSpec = new ResponseSpecBuilder().expectStatusCode(200).build();
         this.journalEntryHelper = new JournalEntryHelper(this.requestSpec, this.responseSpec);
         this.financialActivityAccountHelper = new FinancialActivityAccountHelper(this.requestSpec);
+        TimeZone.setDefault(TimeZone.getTimeZone(Utils.TENANT_TIME_ZONE));
+    }
 
-        this.systemTimeZone = TimeZone.getTimeZone(Utils.TENANT_TIME_ZONE);
+    /***
+     * Test case for Fixed Deposit Account Interest Calculation
+     */
+    @Test
+    public void testFixedDepositInterestCalculationWithWrongCompoundingPeriod() {
+        JsonObject jsonObject = new JsonObject();
+        jsonObject.addProperty("principalAmount", 100);
+        jsonObject.addProperty("annualInterestRate", 5);
+        jsonObject.addProperty("tenureInMonths", 12);
+        jsonObject.addProperty("interestPostingPeriodInMonths", 3);
+        jsonObject.addProperty("interestCompoundingPeriodInMonths", 7);
+        JsonParser parser = new JsonParser();
+        String apiRequestBodyAsJson = jsonObject.toString();
+        JsonElement element = parser.parse(apiRequestBodyAsJson);
+        moneyHelperStatic = Mockito.mockStatic(MoneyHelper.class);
+        moneyHelperStatic.when(() -> MoneyHelper.getMathContext()).thenReturn(new MathContext(12, RoundingMode.UP));
+        fixedDepositAccountInterestCalculationServiceImpl = new FixedDepositAccountInterestCalculationServiceImpl(
+                new DepositAccountDataValidator(new FromJsonHelper(), null), new FromJsonHelper());
+        try {
+            HashMap h = fixedDepositAccountInterestCalculationServiceImpl
+                    .calculateInterest(new JsonQuery(apiRequestBodyAsJson, element, new FromJsonHelper()));
+            fail("The function must throw an exception when called with invalid Compounding period");
+        } catch (PlatformApiDataValidationException e) {
+            assertEquals("Validation errors exist.", e.getMessage());
+        } finally {
+            moneyHelperStatic.close();
+        }
+    }
+
+    @Test
+    public void testFixedDepositInterestCalculationWithWrongCompoundingPeriod2() {
+        JsonObject jsonObject = new JsonObject();
+        jsonObject.addProperty("principalAmount", 100);
+        jsonObject.addProperty("annualInterestRate", 5);
+        jsonObject.addProperty("tenureInMonths", 15);
+        jsonObject.addProperty("interestPostingPeriodInMonths", 3);
+        jsonObject.addProperty("interestCompoundingPeriodInMonths", 6);
+        JsonParser parser = new JsonParser();
+        String apiRequestBodyAsJson = jsonObject.toString();
+        JsonElement element = parser.parse(apiRequestBodyAsJson);
+        moneyHelperStatic = Mockito.mockStatic(MoneyHelper.class);
+        moneyHelperStatic.when(() -> MoneyHelper.getMathContext()).thenReturn(new MathContext(12, RoundingMode.UP));
+        fixedDepositAccountInterestCalculationServiceImpl = new FixedDepositAccountInterestCalculationServiceImpl(
+                new DepositAccountDataValidator(new FromJsonHelper(), null), new FromJsonHelper());
+        try {
+            HashMap h = fixedDepositAccountInterestCalculationServiceImpl
+                    .calculateInterest(new JsonQuery(apiRequestBodyAsJson, element, new FromJsonHelper()));
+            fail("The function must throw an exception when called with invalid Compounding period");
+        } catch (PlatformApiDataValidationException e) {
+            assertEquals("Validation errors exist.", e.getMessage());
+        } finally {
+            moneyHelperStatic.close();
+        }
+    }
+
+    @Test
+    public void testFixedDepositInterestCalculationWithValidInput() {
+        JsonObject jsonObject = new JsonObject();
+        jsonObject.addProperty("principalAmount", 10000);
+        jsonObject.addProperty("annualInterestRate", 5);
+        jsonObject.addProperty("tenureInMonths", 12);
+        jsonObject.addProperty("interestPostingPeriodInMonths", 3);
+        jsonObject.addProperty("interestCompoundingPeriodInMonths", 6);
+        JsonParser parser = new JsonParser();
+        String apiRequestBodyAsJson = jsonObject.toString();
+        JsonElement element = parser.parse(apiRequestBodyAsJson);
+        moneyHelperStatic = Mockito.mockStatic(MoneyHelper.class);
+        moneyHelperStatic.when(() -> MoneyHelper.getMathContext()).thenReturn(new MathContext(12, RoundingMode.UP));
+        fixedDepositAccountInterestCalculationServiceImpl = new FixedDepositAccountInterestCalculationServiceImpl(
+                new DepositAccountDataValidator(new FromJsonHelper(), null), new FromJsonHelper());
+        BigDecimal expectedResult = new BigDecimal("10506.250000");
+        BigDecimal actualResult = new BigDecimal(fixedDepositAccountInterestCalculationServiceImpl
+                .calculateInterest(new JsonQuery(apiRequestBodyAsJson, element, new FromJsonHelper())).get("maturityAmount").toString());
+        assertEquals(expectedResult, actualResult);
+        moneyHelperStatic.close();
     }
 
     /***
@@ -1341,7 +1432,7 @@ public class FixedDepositTest {
         todaysDate = todaysDate.minusMonths(1);
         todaysDate = todaysDate.minusDays(1);
 
-        Float interestPerMonth = (float) (interestPerDay * principal * ChronoUnit.DAYS.between(todaysDate, Utils.getLocalDateOfTenant()));
+        Float interestPerMonth = (float) (interestPerDay * principal * DAYS.between(todaysDate, Utils.getLocalDateOfTenant()));
         principal += interestPerMonth;
         log.info("{}", Utils.dateFormatter.format(todaysDate));
         log.info("IPM = {}", interestPerMonth);
@@ -1441,26 +1532,25 @@ public class FixedDepositTest {
         this.savingsAccountHelper = new SavingsAccountHelper(this.requestSpec, this.responseSpec);
         this.fixedDepositAccountHelper = new FixedDepositAccountHelper(this.requestSpec, this.responseSpec);
 
-        DateFormat dateFormat = new SimpleDateFormat("dd MMMM yyyy", Locale.US);
-        DateFormat monthDayFormat = new SimpleDateFormat("dd MMM", Locale.US);
-        DateFormat currentDateFormat = new SimpleDateFormat("dd");
+        DateTimeFormatter dateFormat = new DateTimeFormatterBuilder().appendPattern("dd MMMM yyyy").toFormatter();
 
-        Calendar todaysDate = Calendar.getInstance();
-        todaysDate.add(Calendar.MONTH, -3);
-        final String VALID_FROM = dateFormat.format(todaysDate.getTime());
-        todaysDate.add(Calendar.YEAR, 10);
-        final String VALID_TO = dateFormat.format(todaysDate.getTime());
+        LocalDate todaysDate = Utils.getLocalDateOfTenant();
+        todaysDate = todaysDate.minusMonths(3);
+        final String VALID_FROM = dateFormat.format(todaysDate);
+        todaysDate = todaysDate.plusYears(10);
+        final String VALID_TO = dateFormat.format(todaysDate);
 
-        todaysDate = Calendar.getInstance();
-        todaysDate.add(Calendar.MONTH, -1);
-        todaysDate.add(Calendar.DAY_OF_MONTH, -1);
-        final String SUBMITTED_ON_DATE = dateFormat.format(todaysDate.getTime());
-        final String APPROVED_ON_DATE = dateFormat.format(todaysDate.getTime());
-        final String ACTIVATION_DATE = dateFormat.format(todaysDate.getTime());
-        monthDayFormat.format(todaysDate.getTime());
-        todaysDate.add(Calendar.MONTH, 1);
-        todaysDate.add(Calendar.DAY_OF_MONTH, 1);
-        final String CLOSED_ON_DATE = dateFormat.format(todaysDate.getTime());
+        todaysDate = Utils.getLocalDateOfTenant();
+        todaysDate = todaysDate.minusMonths(1);
+        todaysDate = todaysDate.minusDays(1);
+        final String SUBMITTED_ON_DATE = dateFormat.format(todaysDate);
+        final String APPROVED_ON_DATE = dateFormat.format(todaysDate);
+        final String ACTIVATION_DATE = dateFormat.format(todaysDate);
+        LocalDate activationDate = todaysDate;
+        todaysDate = todaysDate.plusMonths(1);
+        todaysDate = todaysDate.plusDays(1);
+        final String CLOSED_ON_DATE = dateFormat.format(todaysDate);
+        LocalDate closingDate = todaysDate;
 
         Integer clientId = ClientHelper.createClient(this.requestSpec, this.responseSpec);
         Assertions.assertNotNull(clientId);
@@ -1500,18 +1590,9 @@ public class FixedDepositTest {
         log.info("per day = {}", perDay);
         double interestPerDay = interestRateInFraction * perDay;
 
-        todaysDate.add(Calendar.MONTH, -1);
-        todaysDate.add(Calendar.DAY_OF_MONTH, -1);
-        Integer currentDate = Integer.valueOf(currentDateFormat.format(todaysDate.getTime()));
-        Integer daysInMonth = todaysDate.getActualMaximum(Calendar.DATE);
-        daysInMonth = daysInMonth - currentDate + 1;
-        Float interestPerMonth = (float) (interestPerDay * principal * daysInMonth);
-        principal += interestPerMonth;
-        todaysDate.add(Calendar.DATE, daysInMonth);
-        log.info("{}", monthDayFormat.format(todaysDate.getTime()));
-        interestPerMonth = (float) (interestPerDay * principal * currentDate);
-        log.info("IPM = {}", interestPerMonth);
-        principal += interestPerMonth;
+        long daysBetween = DAYS.between(activationDate, closingDate);
+        Float totalInterest = (float) (interestPerDay * principal * daysBetween);
+        principal += totalInterest;
         log.info("principal = {}", principal);
 
         this.fixedDepositAccountHelper.calculatePrematureAmountForFixedDeposit(fixedDepositAccountId, CLOSED_ON_DATE);
@@ -1540,26 +1621,25 @@ public class FixedDepositTest {
         this.savingsAccountHelper = new SavingsAccountHelper(this.requestSpec, this.responseSpec);
         this.fixedDepositAccountHelper = new FixedDepositAccountHelper(this.requestSpec, this.responseSpec);
 
-        DateFormat dateFormat = new SimpleDateFormat("dd MMMM yyyy", Locale.US);
-        DateFormat monthDayFormat = new SimpleDateFormat("dd MMM", Locale.US);
-        DateFormat currentDateFormat = new SimpleDateFormat("dd");
+        DateTimeFormatter dateFormat = new DateTimeFormatterBuilder().appendPattern("dd MMMM yyyy").toFormatter();
 
-        Calendar todaysDate = Calendar.getInstance();
-        todaysDate.add(Calendar.MONTH, -3);
-        final String VALID_FROM = dateFormat.format(todaysDate.getTime());
-        todaysDate.add(Calendar.YEAR, 10);
-        final String VALID_TO = dateFormat.format(todaysDate.getTime());
+        LocalDate todaysDate = Utils.getLocalDateOfTenant().minusDays(32);
+        todaysDate = todaysDate.minusMonths(3);
+        final String VALID_FROM = dateFormat.format(todaysDate);
+        todaysDate = todaysDate.plusYears(10);
+        final String VALID_TO = dateFormat.format(todaysDate);
 
-        todaysDate = Calendar.getInstance();
-        todaysDate.add(Calendar.MONTH, -1);
-        todaysDate.add(Calendar.DAY_OF_MONTH, -1);
-        final String SUBMITTED_ON_DATE = dateFormat.format(todaysDate.getTime());
-        final String APPROVED_ON_DATE = dateFormat.format(todaysDate.getTime());
-        final String ACTIVATION_DATE = dateFormat.format(todaysDate.getTime());
-        monthDayFormat.format(todaysDate.getTime());
-        todaysDate.add(Calendar.MONTH, 1);
-        todaysDate.add(Calendar.DAY_OF_MONTH, 1);
-        final String CLOSED_ON_DATE = dateFormat.format(todaysDate.getTime());
+        todaysDate = Utils.getLocalDateOfTenant().minusDays(32);
+        todaysDate = todaysDate.minusMonths(1);
+        todaysDate = todaysDate.minusDays(1);
+        final String SUBMITTED_ON_DATE = dateFormat.format(todaysDate);
+        final String APPROVED_ON_DATE = dateFormat.format(todaysDate);
+        final String ACTIVATION_DATE = dateFormat.format(todaysDate);
+        LocalDate activationDate = todaysDate;
+
+        todaysDate = Utils.getLocalDateOfTenant();
+        final String CLOSED_ON_DATE = dateFormat.format(todaysDate);
+        LocalDate closingDate = todaysDate;
 
         Integer clientId = ClientHelper.createClient(this.requestSpec, this.responseSpec);
         Assertions.assertNotNull(clientId);
@@ -1591,15 +1671,7 @@ public class FixedDepositTest {
         ArrayList<ArrayList<HashMap>> interestRateChartData = FixedDepositProductHelper
                 .getInterestRateChartSlabsByProductId(this.requestSpec, this.responseSpec, fixedDepositProductId);
 
-        Calendar activationDate = Calendar.getInstance();
-        activationDate.add(Calendar.MONTH, -1);
-        activationDate.add(Calendar.DAY_OF_MONTH, -1);
-        ZonedDateTime startDate = ZonedDateTime.ofInstant(activationDate.getTime().toInstant(), this.systemTimeZone.toZoneId());
-
-        Calendar prematureClosureDate = Calendar.getInstance();
-        ZonedDateTime endDate = ZonedDateTime.ofInstant(prematureClosureDate.getTime().toInstant(), this.systemTimeZone.toZoneId());
-
-        Integer depositedPeriod = Math.toIntExact(ChronoUnit.MONTHS.between(startDate.toLocalDate(), endDate.toLocalDate()));
+        Integer depositedPeriod = Math.toIntExact(ChronoUnit.MONTHS.between(activationDate, closingDate));
 
         Float interestRate = FixedDepositAccountHelper.getInterestRate(interestRateChartData, depositedPeriod);
         interestRate -= preClosurePenalInterestRate;
@@ -1608,19 +1680,10 @@ public class FixedDepositTest {
         log.info("per day = {}", perDay);
         double interestPerDay = interestRateInFraction * perDay;
 
-        todaysDate.add(Calendar.MONTH, -1);
-        todaysDate.add(Calendar.DAY_OF_MONTH, -1);
-        Integer currentDate = Integer.valueOf(currentDateFormat.format(todaysDate.getTime()));
-        Integer daysInMonth = todaysDate.getActualMaximum(Calendar.DATE);
-        daysInMonth = daysInMonth - currentDate + 1;
-        Float interestPerMonth = (float) (interestPerDay * principal * daysInMonth);
-        principal += interestPerMonth;
-        todaysDate.add(Calendar.DATE, daysInMonth);
-        log.info("{}", monthDayFormat.format(todaysDate.getTime()));
+        long daysBetween = DAYS.between(activationDate, closingDate);
+        Float totalInterest = (float) (interestPerDay * principal * daysBetween);
+        principal += totalInterest;
 
-        interestPerMonth = (float) (interestPerDay * principal * currentDate);
-        log.info("IPM = {}", interestPerMonth);
-        principal += interestPerMonth;
         log.info("principal = {}", principal);
 
         this.fixedDepositAccountHelper.calculatePrematureAmountForFixedDeposit(fixedDepositAccountId, CLOSED_ON_DATE);
@@ -1650,26 +1713,25 @@ public class FixedDepositTest {
         this.savingsAccountHelper = new SavingsAccountHelper(this.requestSpec, this.responseSpec);
         this.fixedDepositAccountHelper = new FixedDepositAccountHelper(this.requestSpec, this.responseSpec);
 
-        DateFormat dateFormat = new SimpleDateFormat("dd MMMM yyyy", Locale.US);
-        DateFormat monthDayFormat = new SimpleDateFormat("dd MMM", Locale.US);
-        DateFormat currentDateFormat = new SimpleDateFormat("dd");
+        DateTimeFormatter dateFormat = new DateTimeFormatterBuilder().appendPattern("dd MMMM yyyy").toFormatter();
 
-        Calendar todaysDate = Calendar.getInstance();
-        todaysDate.add(Calendar.MONTH, -3);
-        final String VALID_FROM = dateFormat.format(todaysDate.getTime());
-        todaysDate.add(Calendar.YEAR, 10);
-        final String VALID_TO = dateFormat.format(todaysDate.getTime());
+        LocalDate todaysDate = Utils.getLocalDateOfTenant().minusDays(32);
+        todaysDate = todaysDate.minusMonths(3);
+        final String VALID_FROM = dateFormat.format(todaysDate);
+        todaysDate = todaysDate.plusYears(10);
+        final String VALID_TO = dateFormat.format(todaysDate);
 
-        todaysDate = Calendar.getInstance();
-        todaysDate.add(Calendar.MONTH, -1);
-        todaysDate.add(Calendar.DAY_OF_MONTH, -1);
-        final String SUBMITTED_ON_DATE = dateFormat.format(todaysDate.getTime());
-        final String APPROVED_ON_DATE = dateFormat.format(todaysDate.getTime());
-        final String ACTIVATION_DATE = dateFormat.format(todaysDate.getTime());
-        monthDayFormat.format(todaysDate.getTime());
-        todaysDate.add(Calendar.MONTH, 1);
-        todaysDate.add(Calendar.DAY_OF_MONTH, 1);
-        final String CLOSED_ON_DATE = dateFormat.format(todaysDate.getTime());
+        todaysDate = Utils.getLocalDateOfTenant().minusDays(32);
+        todaysDate = todaysDate.minusMonths(1);
+        todaysDate = todaysDate.minusDays(1);
+        final String SUBMITTED_ON_DATE = dateFormat.format(todaysDate);
+        final String APPROVED_ON_DATE = dateFormat.format(todaysDate);
+        final String ACTIVATION_DATE = dateFormat.format(todaysDate);
+        LocalDate activationDate = todaysDate;
+
+        todaysDate = Utils.getLocalDateOfTenant();
+        final String CLOSED_ON_DATE = dateFormat.format(todaysDate);
+        LocalDate closingDate = todaysDate;
 
         Integer clientId = ClientHelper.createClient(this.requestSpec, this.responseSpec);
         Assertions.assertNotNull(clientId);
@@ -1705,15 +1767,7 @@ public class FixedDepositTest {
         ArrayList<ArrayList<HashMap>> interestRateChartData = FixedDepositProductHelper
                 .getInterestRateChartSlabsByProductId(this.requestSpec, this.responseSpec, fixedDepositProductId);
 
-        Calendar activationDate = Calendar.getInstance();
-        activationDate.add(Calendar.MONTH, -1);
-        activationDate.add(Calendar.DAY_OF_MONTH, -1);
-        ZonedDateTime startDate = ZonedDateTime.ofInstant(activationDate.getTime().toInstant(), this.systemTimeZone.toZoneId());
-
-        Calendar prematureClosureDate = Calendar.getInstance();
-        ZonedDateTime endDate = ZonedDateTime.ofInstant(prematureClosureDate.getTime().toInstant(), this.systemTimeZone.toZoneId());
-
-        Integer depositedPeriod = Math.toIntExact(ChronoUnit.MONTHS.between(startDate.toLocalDate(), endDate.toLocalDate()));
+        Integer depositedPeriod = Math.toIntExact(ChronoUnit.MONTHS.between(activationDate, closingDate));
 
         Float interestRate = FixedDepositAccountHelper.getInterestRate(interestRateChartData, depositedPeriod);
         interestRate -= preClosurePenalInterestRate;
@@ -1722,19 +1776,10 @@ public class FixedDepositTest {
         log.info("per day = {}", perDay);
         double interestPerDay = interestRateInFraction * perDay;
 
-        todaysDate.add(Calendar.MONTH, -1);
-        todaysDate.add(Calendar.DAY_OF_MONTH, -1);
-        Integer currentDate = Integer.valueOf(currentDateFormat.format(todaysDate.getTime()));
-        Integer daysInMonth = todaysDate.getActualMaximum(Calendar.DATE);
-        daysInMonth = daysInMonth - currentDate + 1;
-        Float interestPerMonth = (float) (interestPerDay * principal * daysInMonth);
-        principal += interestPerMonth;
-        todaysDate.add(Calendar.DATE, daysInMonth);
-        log.info("{}", monthDayFormat.format(todaysDate.getTime()));
+        long daysBetween = DAYS.between(activationDate, closingDate);
+        Float totalInterest = (float) (interestPerDay * principal * daysBetween);
+        principal += totalInterest;
 
-        interestPerMonth = (float) (interestPerDay * principal * currentDate);
-        log.info("IPM = {}", interestPerMonth);
-        principal += interestPerMonth;
         log.info("principal = {}", principal);
 
         this.fixedDepositAccountHelper.calculatePrematureAmountForFixedDeposit(fixedDepositAccountId, CLOSED_ON_DATE);
@@ -2633,7 +2678,8 @@ public class FixedDepositTest {
         log.info("--------------------------------APPLYING FOR FIXED DEPOSIT ACCOUNT --------------------------------");
         final String fixedDepositApplicationJSON = new FixedDepositAccountHelper(this.requestSpec, this.responseSpec) //
                 .withSubmittedOnDate(submittedOnDate).build(clientID, productID, penalInterestType);
-        return FixedDepositAccountHelper.applyFixedDepositApplication(fixedDepositApplicationJSON, this.requestSpec, this.responseSpec);
+        return FixedDepositAccountHelper.applyFixedDepositApplicationGetId(fixedDepositApplicationJSON, this.requestSpec,
+                this.responseSpec);
     }
 
     private Integer applyForFixedDepositApplication(final String clientID, final String productID, final String submittedOnDate,
@@ -2642,7 +2688,8 @@ public class FixedDepositTest {
         final String fixedDepositApplicationJSON = new FixedDepositAccountHelper(this.requestSpec, this.responseSpec) //
                 .withSubmittedOnDate(submittedOnDate).withMaturityInstructionId(maturityInstructionId)
                 .build(clientID, productID, penalInterestType);
-        return FixedDepositAccountHelper.applyFixedDepositApplication(fixedDepositApplicationJSON, this.requestSpec, this.responseSpec);
+        return FixedDepositAccountHelper.applyFixedDepositApplicationGetId(fixedDepositApplicationJSON, this.requestSpec,
+                this.responseSpec);
     }
 
     private Integer applyForFixedDepositApplication(final String clientID, final String productID, final String submittedOnDate,
@@ -2652,7 +2699,8 @@ public class FixedDepositTest {
                 //
                 .withSubmittedOnDate(submittedOnDate).withDepositPeriod(depositPeriod).withDepositAmount(depositAmount)
                 .build(clientID, productID, penalInterestType);
-        return FixedDepositAccountHelper.applyFixedDepositApplication(fixedDepositApplicationJSON, this.requestSpec, this.responseSpec);
+        return FixedDepositAccountHelper.applyFixedDepositApplicationGetId(fixedDepositApplicationJSON, this.requestSpec,
+                this.responseSpec);
     }
 
     private Integer createSavingsProduct(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,

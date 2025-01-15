@@ -23,7 +23,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.Collection;
+import lombok.RequiredArgsConstructor;
 import org.apache.fineract.infrastructure.core.data.EnumOptionData;
+import org.apache.fineract.infrastructure.core.domain.ExternalId;
 import org.apache.fineract.infrastructure.core.domain.JdbcSupport;
 import org.apache.fineract.infrastructure.core.service.Page;
 import org.apache.fineract.infrastructure.core.service.PaginationHelper;
@@ -32,32 +34,26 @@ import org.apache.fineract.infrastructure.core.service.database.DatabaseSpecific
 import org.apache.fineract.organisation.monetary.data.CurrencyData;
 import org.apache.fineract.portfolio.client.data.ClientTransactionData;
 import org.apache.fineract.portfolio.client.domain.ClientEnumerations;
+import org.apache.fineract.portfolio.client.domain.ClientTransaction;
+import org.apache.fineract.portfolio.client.domain.ClientTransactionRepository;
 import org.apache.fineract.portfolio.client.domain.ClientTransactionType;
 import org.apache.fineract.portfolio.client.exception.ClientTransactionNotFoundException;
 import org.apache.fineract.portfolio.paymentdetail.data.PaymentDetailData;
 import org.apache.fineract.portfolio.paymenttype.data.PaymentTypeData;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
 
 @Service
+@RequiredArgsConstructor
 public class ClientTransactionReadPlatformServiceImpl implements ClientTransactionReadPlatformService {
 
     private final JdbcTemplate jdbcTemplate;
     private final DatabaseSpecificSQLGenerator sqlGenerator;
-    private final ClientTransactionMapper clientTransactionMapper;
+    private final ClientTransactionMapper clientTransactionMapper = new ClientTransactionMapper();
     private final PaginationHelper paginationHelper;
-
-    @Autowired
-    public ClientTransactionReadPlatformServiceImpl(final JdbcTemplate jdbcTemplate, DatabaseSpecificSQLGenerator sqlGenerator,
-            PaginationHelper paginationHelper) {
-        this.jdbcTemplate = jdbcTemplate;
-        this.sqlGenerator = sqlGenerator;
-        this.clientTransactionMapper = new ClientTransactionMapper();
-        this.paginationHelper = paginationHelper;
-    }
+    private final ClientTransactionRepository clientTransactionRepository;
 
     private static final class ClientTransactionMapper implements RowMapper<ClientTransactionData> {
 
@@ -147,9 +143,9 @@ public class ClientTransactionReadPlatformServiceImpl implements ClientTransacti
 
         // apply limit and offsets
 
-        if (searchParameters.isLimited()) {
+        if (searchParameters.hasLimit()) {
             sqlBuilder.append(" ");
-            if (searchParameters.isOffset()) {
+            if (searchParameters.hasOffset()) {
                 sqlBuilder.append(sqlGenerator.limit(searchParameters.getLimit(), searchParameters.getOffset()));
             } else {
                 sqlBuilder.append(sqlGenerator.limit(searchParameters.getLimit()));
@@ -181,6 +177,11 @@ public class ClientTransactionReadPlatformServiceImpl implements ClientTransacti
         } catch (final EmptyResultDataAccessException e) {
             throw new ClientTransactionNotFoundException(clientId, transactionId, e);
         }
+    }
+
+    @Override
+    public ClientTransaction retrieveTransactionByExternalId(ExternalId transactionExternalId) {
+        return clientTransactionRepository.findByExternalId(transactionExternalId);
     }
 
 }

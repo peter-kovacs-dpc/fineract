@@ -26,20 +26,21 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.UriInfo;
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.Set;
-import javax.ws.rs.Consumes;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.PUT;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.UriInfo;
+import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.commands.domain.CommandWrapper;
 import org.apache.fineract.commands.service.CommandWrapperBuilder;
@@ -53,20 +54,19 @@ import org.apache.fineract.infrastructure.core.serialization.DefaultToApiJsonSer
 import org.apache.fineract.infrastructure.core.service.Page;
 import org.apache.fineract.infrastructure.core.service.SearchParameters;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
+import org.apache.fineract.infrastructure.security.service.SqlValidator;
 import org.apache.fineract.portfolio.account.data.AccountTransferData;
 import org.apache.fineract.portfolio.account.data.StandingInstructionDTO;
 import org.apache.fineract.portfolio.account.data.StandingInstructionData;
 import org.apache.fineract.portfolio.account.service.AccountTransfersReadPlatformService;
 import org.apache.fineract.portfolio.account.service.StandingInstructionReadPlatformService;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Component;
 
-@Path("/standinginstructions")
+@Path("/v1/standinginstructions")
 @Component
-@Scope("singleton")
 @Tag(name = "Standing Instructions", description = "Standing instructions (or standing orders) refer to instructions a bank account holder (\"the payer\") gives to his or her bank to pay a set amount at regular intervals to another's (\"the payee's\") account.\n"
         + "\n" + "Note: At present only savings account to savings account and savings account to Loan account transfers are permitted.")
+@RequiredArgsConstructor
 public class StandingInstructionApiResource {
 
     private final PlatformSecurityContext context;
@@ -75,21 +75,7 @@ public class StandingInstructionApiResource {
     private final ApiRequestParameterHelper apiRequestParameterHelper;
     private final StandingInstructionReadPlatformService standingInstructionReadPlatformService;
     private final AccountTransfersReadPlatformService accountTransfersReadPlatformService;
-
-    @Autowired
-    public StandingInstructionApiResource(final PlatformSecurityContext context,
-            final DefaultToApiJsonSerializer<StandingInstructionData> toApiJsonSerializer,
-            final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService,
-            final ApiRequestParameterHelper apiRequestParameterHelper,
-            final StandingInstructionReadPlatformService standingInstructionReadPlatformService,
-            final AccountTransfersReadPlatformService accountTransfersReadPlatformService) {
-        this.context = context;
-        this.toApiJsonSerializer = toApiJsonSerializer;
-        this.commandsSourceWritePlatformService = commandsSourceWritePlatformService;
-        this.apiRequestParameterHelper = apiRequestParameterHelper;
-        this.standingInstructionReadPlatformService = standingInstructionReadPlatformService;
-        this.accountTransfersReadPlatformService = accountTransfersReadPlatformService;
-    }
+    private final SqlValidator sqlValidator;
 
     @GET
     @Path("template")
@@ -185,7 +171,6 @@ public class StandingInstructionApiResource {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = StandingInstructionApiResourceSwagger.GetStandingInstructionsResponse.class))) })
     public String retrieveAll(@Context final UriInfo uriInfo,
-            @QueryParam("sqlSearch") @Parameter(description = "sqlSearch") final String sqlSearch,
             @QueryParam("externalId") @Parameter(description = "externalId") final String externalId,
             @QueryParam("offset") @Parameter(description = "offset") final Integer offset,
             @QueryParam("limit") @Parameter(description = "limit") final Integer limit,
@@ -199,8 +184,11 @@ public class StandingInstructionApiResource {
 
         this.context.authenticatedUser().validateHasReadPermission(StandingInstructionApiConstants.STANDING_INSTRUCTION_RESOURCE_NAME);
 
-        final SearchParameters searchParameters = SearchParameters.forAccountTransfer(sqlSearch, externalId, offset, limit, orderBy,
-                sortOrder);
+        sqlValidator.validate(orderBy);
+        sqlValidator.validate(sortOrder);
+        sqlValidator.validate(externalId);
+        final SearchParameters searchParameters = SearchParameters.builder().limit(limit).externalId(externalId).offset(offset)
+                .orderBy(orderBy).sortOrder(sortOrder).build();
 
         final LocalDate startDateRange = null;
         final LocalDate endDateRange = null;
@@ -222,8 +210,7 @@ public class StandingInstructionApiResource {
             @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = StandingInstructionApiResourceSwagger.GetStandingInstructionsStandingInstructionIdResponse.class))) })
     public String retrieveOne(
             @PathParam("standingInstructionId") @Parameter(description = "standingInstructionId") final Long standingInstructionId,
-            @Context final UriInfo uriInfo, @QueryParam("sqlSearch") @Parameter(description = "sqlSearch") final String sqlSearch,
-            @QueryParam("externalId") @Parameter(description = "externalId") final String externalId,
+            @Context final UriInfo uriInfo, @QueryParam("externalId") @Parameter(description = "externalId") final String externalId,
             @QueryParam("offset") @Parameter(description = "offset") final Integer offset,
             @QueryParam("limit") @Parameter(description = "limit") final Integer limit,
             @QueryParam("orderBy") @Parameter(description = "orderBy") final String orderBy,
@@ -231,9 +218,11 @@ public class StandingInstructionApiResource {
 
         this.context.authenticatedUser().validateHasReadPermission(StandingInstructionApiConstants.STANDING_INSTRUCTION_RESOURCE_NAME);
 
+        sqlValidator.validate(orderBy);
+        sqlValidator.validate(sortOrder);
         StandingInstructionData standingInstructionData = this.standingInstructionReadPlatformService.retrieveOne(standingInstructionId);
-        final SearchParameters searchParameters = SearchParameters.forAccountTransfer(sqlSearch, externalId, offset, limit, orderBy,
-                sortOrder);
+        final SearchParameters searchParameters = SearchParameters.builder().limit(limit).externalId(externalId).offset(offset)
+                .orderBy(orderBy).sortOrder(sortOrder).build();
         final Set<String> associationParameters = ApiParameterHelper.extractAssociationsForResponseIfProvided(uriInfo.getQueryParameters());
         Page<AccountTransferData> transfers = null;
         if (!associationParameters.isEmpty()) {

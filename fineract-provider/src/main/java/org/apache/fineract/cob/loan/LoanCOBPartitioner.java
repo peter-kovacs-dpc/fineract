@@ -18,15 +18,19 @@
  */
 package org.apache.fineract.cob.loan;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.cob.COBBusinessStepService;
+import org.apache.fineract.cob.data.BusinessStepNameAndOrder;
+import org.apache.fineract.cob.data.LoanCOBParameter;
+import org.apache.fineract.cob.data.LoanCOBPartition;
 import org.apache.fineract.infrastructure.jobs.service.JobName;
 import org.apache.fineract.infrastructure.springbatch.PropertyService;
 import org.jetbrains.annotations.NotNull;
@@ -37,7 +41,8 @@ import org.springframework.batch.core.launch.JobOperator;
 import org.springframework.batch.core.launch.NoSuchJobExecutionException;
 import org.springframework.batch.core.partition.support.Partitioner;
 import org.springframework.batch.item.ExecutionContext;
-import org.springframework.util.CollectionUtils;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.util.StopWatch;
 
 @Slf4j
 @RequiredArgsConstructor
@@ -47,56 +52,61 @@ public class LoanCOBPartitioner implements Partitioner {
 
     private final PropertyService propertyService;
     private final COBBusinessStepService cobBusinessStepService;
+    private final RetrieveLoanIdService retrieveLoanIdService;
     private final JobOperator jobOperator;
     private final JobExplorer jobExplorer;
 
-    private final List<Long> loanIds;
+    private final Long numberOfDays;
+
+    @Value("#{stepExecutionContext['BusinessDate']}")
+    @Setter
+    private LocalDate businessDate;
+    @Value("#{stepExecutionContext['IS_CATCH_UP']}")
+    @Setter
+    private Boolean isCatchUp;
 
     @NotNull
     @Override
     public Map<String, ExecutionContext> partition(int gridSize) {
         int partitionSize = propertyService.getPartitionSize(LoanCOBConstant.JOB_NAME);
-        TreeMap<Long, String> cobBusinessStepMap = cobBusinessStepService.getCOBBusinessStepMap(LoanCOBBusinessStep.class,
+        Set<BusinessStepNameAndOrder> cobBusinessSteps = cobBusinessStepService.getCOBBusinessSteps(LoanCOBBusinessStep.class,
                 LoanCOBConstant.LOAN_COB_JOB_NAME);
-        if (cobBusinessStepMap.isEmpty()) {
+        return getPartitions(partitionSize, cobBusinessSteps);
+    }
+
+    private Map<String, ExecutionContext> getPartitions(int partitionSize, Set<BusinessStepNameAndOrder> cobBusinessSteps) {
+        if (cobBusinessSteps.isEmpty()) {
             stopJobExecution();
             return Map.of();
         }
-        return getPartitions(partitionSize, cobBusinessStepMap);
+        StopWatch sw = new StopWatch();
+        sw.start();
+        List<LoanCOBPartition> loanCOBPartitions = new ArrayList<>(
+                retrieveLoanIdService.retrieveLoanCOBPartitions(numberOfDays, businessDate, isCatchUp != null && isCatchUp, partitionSize));
+        sw.stop();
+        // if there is no loan to be closed, we still would like to create at least one partition
+
+        if (loanCOBPartitions.size() == 0) {
+            loanCOBPartitions.add(new LoanCOBPartition(0L, 0L, 1L, 0L));
+        }
+        log.info(
+                "LoanCOBPartitioner found {} loans to be processed as part of COB. {} partitions were created using partition size {}. RetrieveLoanCOBPartitions was executed in {} ms.",
+                getLoanCount(loanCOBPartitions), loanCOBPartitions.size(), partitionSize, sw.getTotalTimeMillis());
+        return loanCOBPartitions.stream()
+                .collect(Collectors.toMap(l -> PARTITION_PREFIX + l.getPageNo(), l -> createNewPartition(cobBusinessSteps, l)));
     }
 
-    private Map<String, ExecutionContext> getPartitions(int partitionSize, TreeMap<Long, String> cobBusinessStepMap) {
-        Map<String, ExecutionContext> partitions = new HashMap<>();
-
-        if (CollectionUtils.isEmpty(loanIds)) {
-            stopJobExecution();
-            return Map.of();
-        }
-        int partitionIndex = 1;
-        int remainingSpace = 0;
-        createNewPartition(partitions, partitionIndex, cobBusinessStepMap);
-        for (Long loanId : loanIds) {
-            if (remainingSpace == partitionSize) {
-                partitionIndex++;
-                createNewPartition(partitions, partitionIndex, cobBusinessStepMap);
-                remainingSpace = 0;
-            }
-            String key = PARTITION_PREFIX + partitionIndex;
-            ExecutionContext executionContext = partitions.get(key);
-            List<Long> data = (List<Long>) executionContext.get(LoanCOBConstant.LOAN_IDS);
-            data.add(loanId);
-            remainingSpace++;
-        }
-        return partitions;
+    private long getLoanCount(List<LoanCOBPartition> loanCOBPartitions) {
+        return loanCOBPartitions.stream().map(LoanCOBPartition::getCount).reduce(0L, Long::sum);
     }
 
-    private void createNewPartition(Map<String, ExecutionContext> partitions, int partitionIndex,
-            TreeMap<Long, String> cobBusinessStepMap) {
+    private ExecutionContext createNewPartition(Set<BusinessStepNameAndOrder> cobBusinessSteps, LoanCOBPartition loanCOBPartition) {
         ExecutionContext executionContext = new ExecutionContext();
-        executionContext.put(LoanCOBConstant.LOAN_IDS, new ArrayList<Long>());
-        executionContext.put(LoanCOBConstant.BUSINESS_STEP_MAP, cobBusinessStepMap);
-        executionContext.put("partition", PARTITION_PREFIX + partitionIndex);
-        partitions.put(PARTITION_PREFIX + partitionIndex, executionContext);
+        executionContext.put(LoanCOBConstant.BUSINESS_STEPS, cobBusinessSteps);
+        executionContext.put(LoanCOBConstant.LOAN_COB_PARAMETER,
+                new LoanCOBParameter(loanCOBPartition.getMinId(), loanCOBPartition.getMaxId()));
+        executionContext.put("partition", PARTITION_PREFIX + loanCOBPartition.getPageNo());
+        return executionContext;
     }
 
     private void stopJobExecution() {

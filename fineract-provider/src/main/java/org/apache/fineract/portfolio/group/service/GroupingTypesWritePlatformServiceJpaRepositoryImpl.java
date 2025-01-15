@@ -18,6 +18,7 @@
  */
 package org.apache.fineract.portfolio.group.service;
 
+import jakarta.persistence.PersistenceException;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.HashMap;
@@ -26,7 +27,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import javax.persistence.PersistenceException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.exception.ExceptionUtils;
@@ -42,6 +42,7 @@ import org.apache.fineract.infrastructure.configuration.domain.ConfigurationDoma
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuilder;
+import org.apache.fineract.infrastructure.core.exception.ErrorHandler;
 import org.apache.fineract.infrastructure.core.exception.GeneralPlatformDomainRuleException;
 import org.apache.fineract.infrastructure.core.exception.PlatformDataIntegrityException;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
@@ -57,12 +58,12 @@ import org.apache.fineract.organisation.office.domain.OfficeRepositoryWrapper;
 import org.apache.fineract.organisation.office.exception.InvalidOfficeException;
 import org.apache.fineract.organisation.staff.domain.Staff;
 import org.apache.fineract.organisation.staff.domain.StaffRepositoryWrapper;
+import org.apache.fineract.portfolio.account.service.AccountNumberGenerator;
 import org.apache.fineract.portfolio.calendar.domain.Calendar;
 import org.apache.fineract.portfolio.calendar.domain.CalendarEntityType;
 import org.apache.fineract.portfolio.calendar.domain.CalendarInstance;
 import org.apache.fineract.portfolio.calendar.domain.CalendarInstanceRepository;
 import org.apache.fineract.portfolio.calendar.domain.CalendarType;
-import org.apache.fineract.portfolio.client.domain.AccountNumberGenerator;
 import org.apache.fineract.portfolio.client.domain.Client;
 import org.apache.fineract.portfolio.client.domain.ClientRepositoryWrapper;
 import org.apache.fineract.portfolio.client.service.LoanStatusMapper;
@@ -81,6 +82,7 @@ import org.apache.fineract.portfolio.group.exception.InvalidGroupStateTransition
 import org.apache.fineract.portfolio.group.serialization.GroupingTypesDataValidator;
 import org.apache.fineract.portfolio.loanaccount.domain.Loan;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanRepositoryWrapper;
+import org.apache.fineract.portfolio.loanaccount.service.LoanOfficerService;
 import org.apache.fineract.portfolio.note.domain.Note;
 import org.apache.fineract.portfolio.note.domain.NoteRepository;
 import org.apache.fineract.portfolio.savings.domain.SavingsAccount;
@@ -88,12 +90,10 @@ import org.apache.fineract.portfolio.savings.domain.SavingsAccountRepositoryWrap
 import org.apache.fineract.useradministration.domain.AppUser;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.jpa.JpaSystemException;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.ObjectUtils;
 
-@Service
 @Slf4j
 @RequiredArgsConstructor
 public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements GroupingTypesWritePlatformService {
@@ -116,6 +116,7 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
     private final AccountNumberGenerator accountNumberGenerator;
     private final EntityDatatableChecksWritePlatformService entityDatatableChecksWritePlatformService;
     private final BusinessEventNotifierService businessEventNotifierService;
+    private final LoanOfficerService loanOfficerService;
 
     private CommandProcessingResult createGroupingType(final JsonCommand command, final GroupTypes groupingType, final Long centerId) {
         try {
@@ -153,7 +154,7 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
 
             final boolean active = command.booleanPrimitiveValueOfParameterNamed(GroupingTypesApiConstants.activeParamName);
             LocalDate submittedOnDate = DateUtils.getBusinessLocalDate();
-            if (active && submittedOnDate.isAfter(activationDate)) {
+            if (active && DateUtils.isAfter(submittedOnDate, activationDate)) {
                 submittedOnDate = activationDate;
             }
             if (command.hasParameter(GroupingTypesApiConstants.submittedOnDateParamName)) {
@@ -173,16 +174,16 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
 
                 if (newGroup.isCenter()) {
                     final CommandWrapper commandWrapper = new CommandWrapperBuilder().activateCenter(null).build();
-                    rollbackTransaction = this.commandProcessingService.validateCommand(commandWrapper, currentUser);
+                    rollbackTransaction = this.commandProcessingService.validateRollbackCommand(commandWrapper, currentUser);
                 } else {
                     final CommandWrapper commandWrapper = new CommandWrapperBuilder().activateGroup(null).build();
-                    rollbackTransaction = this.commandProcessingService.validateCommand(commandWrapper, currentUser);
+                    rollbackTransaction = this.commandProcessingService.validateRollbackCommand(commandWrapper, currentUser);
                 }
             }
 
             if (!newGroup.isCenter() && newGroup.hasActiveClients()) {
                 final CommandWrapper commandWrapper = new CommandWrapperBuilder().associateClientsToGroup(newGroup.getId()).build();
-                rollbackTransaction = this.commandProcessingService.validateCommand(commandWrapper, currentUser);
+                rollbackTransaction = this.commandProcessingService.validateRollbackCommand(commandWrapper, currentUser);
             }
 
             // pre-save to generate id for use in group hierarchy
@@ -201,13 +202,13 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
 
             if (newGroup.isGroup()) {
                 if (command.parameterExists(GroupingTypesApiConstants.datatables)) {
-                    this.entityDatatableChecksWritePlatformService.saveDatatables(StatusEnum.CREATE.getCode().longValue(),
+                    this.entityDatatableChecksWritePlatformService.saveDatatables(StatusEnum.CREATE.getValue(),
                             EntityTables.GROUP.getName(), newGroup.getId(), null,
                             command.arrayOfParameterNamed(GroupingTypesApiConstants.datatables));
                 }
 
                 this.entityDatatableChecksWritePlatformService.runTheCheck(newGroup.getId(), EntityTables.GROUP.getName(),
-                        StatusEnum.CREATE.getCode().longValue(), EntityTables.GROUP.getForeignKeyColumnNameOnDatatable());
+                        StatusEnum.CREATE.getValue(), EntityTables.GROUP.getForeignKeyColumnNameOnDatatable(), null);
             }
 
             return new CommandProcessingResultBuilder() //
@@ -323,8 +324,8 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
         if (!isGroupClientCountValid) {
             throw new GroupMemberCountNotInPermissibleRangeException(group.getId(), minClients, maxClients);
         }
-        entityDatatableChecksWritePlatformService.runTheCheck(group.getId(), EntityTables.GROUP.getName(),
-                StatusEnum.ACTIVATE.getCode().longValue(), EntityTables.GROUP.getForeignKeyColumnNameOnDatatable());
+        entityDatatableChecksWritePlatformService.runTheCheck(group.getId(), EntityTables.GROUP.getName(), StatusEnum.ACTIVATE.getValue(),
+                EntityTables.GROUP.getForeignKeyColumnNameOnDatatable(), null);
     }
 
     public void validateGroupRulesBeforeClientAssociation(final Group group) {
@@ -518,7 +519,7 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
                     if (this.loanRepositoryWrapper.doNonClosedLoanAccountsExistForClient(client.getId())) {
                         for (final Loan loan : this.loanRepositoryWrapper.findLoanByClientId(client.getId())) {
                             if (loan.isDisbursed() && !loan.isClosed()) {
-                                loan.reassignLoanOfficer(staff, loanOfficerReassignmentDate);
+                                loanOfficerService.reassignLoanOfficer(loan, staff, loanOfficerReassignmentDate);
                             }
                         }
                     }
@@ -569,8 +570,8 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
         } catch (final JpaSystemException | DataIntegrityViolationException dve) {
             Throwable throwable = ExceptionUtils.getRootCause(dve.getCause());
             log.error("Error occured.", throwable);
-            throw new PlatformDataIntegrityException("error.msg.group.unknown.data.integrity.issue",
-                    "Unknown data integrity issue with resource.", dve);
+            throw ErrorHandler.getMappable(dve, "error.msg.group.unknown.data.integrity.issue",
+                    "Unknown data integrity issue with resource.");
         }
     }
 
@@ -595,8 +596,8 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
 
         validateLoansAndSavingsForGroupOrCenterClose(group, closureDate);
 
-        entityDatatableChecksWritePlatformService.runTheCheck(groupId, EntityTables.GROUP.getName(), StatusEnum.CLOSE.getCode().longValue(),
-                EntityTables.GROUP.getForeignKeyColumnNameOnDatatable());
+        entityDatatableChecksWritePlatformService.runTheCheck(groupId, EntityTables.GROUP.getName(), StatusEnum.CLOSE.getValue(),
+                EntityTables.GROUP.getForeignKeyColumnNameOnDatatable(), null);
 
         group.close(currentUser, closureReason, closureDate);
 
@@ -611,12 +612,12 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
     private void validateLoansAndSavingsForGroupOrCenterClose(final Group groupOrCenter, final LocalDate closureDate) {
         final Collection<Loan> groupLoans = this.loanRepositoryWrapper.findByGroupId(groupOrCenter.getId());
         for (final Loan loan : groupLoans) {
-            final LoanStatusMapper loanStatus = new LoanStatusMapper(loan.status().getValue());
+            final LoanStatusMapper loanStatus = new LoanStatusMapper(loan.getStatus().getValue());
             if (loanStatus.isOpen()) {
                 final String errorMessage = groupOrCenter.getGroupLevel().getLevelName() + " cannot be closed because of non-closed loans.";
                 throw new InvalidGroupStateTransitionException(groupOrCenter.getGroupLevel().getLevelName(), "close", "loan.not.closed",
                         errorMessage);
-            } else if (loanStatus.isClosed() && loan.getClosedOnDate().isAfter(closureDate)) {
+            } else if (loanStatus.isClosed() && DateUtils.isAfter(loan.getClosedOnDate(), closureDate)) {
                 final String errorMessage = groupOrCenter.getGroupLevel().getLevelName()
                         + "closureDate cannot be before the loan closedOnDate.";
                 throw new InvalidGroupStateTransitionException(groupOrCenter.getGroupLevel().getLevelName(), "close",
@@ -640,7 +641,7 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
                         + " cannot be closed with active savings accounts associated.";
                 throw new InvalidGroupStateTransitionException(groupOrCenter.getGroupLevel().getLevelName(), "close",
                         "savings.account.not.closed", errorMessage);
-            } else if (saving.isClosed() && saving.getClosedOnDate().isAfter(closureDate)) {
+            } else if (saving.isClosed() && DateUtils.isAfter(saving.getClosedOnDate(), closureDate)) {
                 final String errorMessage = groupOrCenter.getGroupLevel().getLevelName()
                         + " closureDate cannot be before the loan closedOnDate.";
                 throw new InvalidGroupStateTransitionException(groupOrCenter.getGroupLevel().getLevelName(), "close",
@@ -670,8 +671,8 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
 
         validateLoansAndSavingsForGroupOrCenterClose(center, closureDate);
 
-        entityDatatableChecksWritePlatformService.runTheCheck(centerId, EntityTables.GROUP.getName(),
-                StatusEnum.ACTIVATE.getCode().longValue(), EntityTables.GROUP.getForeignKeyColumnNameOnDatatable());
+        entityDatatableChecksWritePlatformService.runTheCheck(centerId, EntityTables.GROUP.getName(), StatusEnum.ACTIVATE.getValue(),
+                EntityTables.GROUP.getForeignKeyColumnNameOnDatatable(), null);
 
         center.close(currentUser, closureReason, closureDate);
 
@@ -729,7 +730,6 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
      */
     private void handleGroupDataIntegrityIssues(final JsonCommand command, final Throwable realCause, final Exception dve,
             final GroupTypes groupLevel) {
-
         String levelName = "Invalid";
         switch (groupLevel) {
             case CENTER:
@@ -744,16 +744,13 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
 
         String errorMessageForUser = null;
         String errorMessageForMachine = null;
-
         if (realCause.getMessage().contains("'external_id'")) {
-
             final String externalId = command.stringValueOfParameterNamed(GroupingTypesApiConstants.externalIdParamName);
             errorMessageForUser = levelName + " with externalId `" + externalId + "` already exists.";
             errorMessageForMachine = "error.msg." + levelName.toLowerCase() + ".duplicate.externalId";
             throw new PlatformDataIntegrityException(errorMessageForMachine, errorMessageForUser,
                     GroupingTypesApiConstants.externalIdParamName, externalId);
         } else if (realCause.getMessage().contains("'name'")) {
-
             final String name = command.stringValueOfParameterNamed(GroupingTypesApiConstants.nameParamName);
             errorMessageForUser = levelName + " with name `" + name + "` already exists.";
             errorMessageForMachine = "error.msg." + levelName.toLowerCase() + ".duplicate.name";
@@ -762,8 +759,7 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
         }
 
         log.error("Error occured.", dve);
-        throw new PlatformDataIntegrityException("error.msg.group.unknown.data.integrity.issue",
-                "Unknown data integrity issue with resource.");
+        throw ErrorHandler.getMappable(dve, "error.msg.group.unknown.data.integrity.issue", "Unknown data integrity issue with resource.");
     }
 
     @Override
@@ -906,7 +902,7 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
 
     public void validateOfficeOpeningDateisAfterGroupOrCenterOpeningDate(final Office groupOffice, final GroupLevel groupLevel,
             final LocalDate activationDate) {
-        if (activationDate != null && groupOffice.getOpeningLocalDate().isAfter(activationDate)) {
+        if (activationDate != null && DateUtils.isAfter(groupOffice.getOpeningLocalDate(), activationDate)) {
             final String levelName = groupLevel.getLevelName();
             final String errorMessage = levelName + " activation date should be greater than or equal to the parent Office's creation date "
                     + activationDate.toString();
@@ -916,10 +912,7 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
     }
 
     private void checkGroupMembersMeetingSyncWithCenterMeeting(final Long centerId, final Set<Group> groupMembers) {
-
-        /**
-         * Get parent(center) calendar
-         */
+        // Get parent(center) calendar
         Calendar ceneterCalendar = null;
         final CalendarInstance parentCalendarInstance = this.calendarInstanceRepository.findByEntityIdAndEntityTypeIdAndCalendarTypeId(
                 centerId, CalendarEntityType.CENTERS.getValue(), CalendarType.COLLECTION.getValue());
@@ -928,9 +921,7 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
         }
 
         for (final Group group : groupMembers) {
-            /**
-             * Get child(group) calendar
-             */
+            // Get child(group) calendar
             Calendar groupCalendar = null;
             final CalendarInstance groupCalendarInstance = this.calendarInstanceRepository.findByEntityIdAndEntityTypeIdAndCalendarTypeId(
                     group.getId(), CalendarEntityType.GROUPS.getValue(), CalendarType.COLLECTION.getValue());
@@ -938,19 +929,14 @@ public class GroupingTypesWritePlatformServiceJpaRepositoryImpl implements Group
                 groupCalendar = groupCalendarInstance.getCalendar();
             }
 
-            /**
-             * Group shouldn't have a meeting when no meeting attached for center
-             */
+            // Group shouldn't have a meeting when no meeting attached for center
             if (ceneterCalendar == null && groupCalendar != null) {
                 throw new GeneralPlatformDomainRuleException(
                         "error.msg.center.associating.group.not.allowed.with.meeting.attached.to.group",
                         "Group with id " + group.getId() + " is already associated with meeting", group.getId());
             }
-            /**
-             * Group meeting recurrence should match with center meeting recurrence
-             */
+            // Group meeting recurrence should match with center meeting recurrence
             else if (ceneterCalendar != null && groupCalendar != null) {
-
                 if (!ceneterCalendar.getRecurrence().equalsIgnoreCase(groupCalendar.getRecurrence())) {
                     throw new GeneralPlatformDomainRuleException("error.msg.center.associating.group.not.allowed.with.different.meeting",
                             "Group with id " + group.getId() + " meeting recurrence doesnot matched with center meeting recurrence",

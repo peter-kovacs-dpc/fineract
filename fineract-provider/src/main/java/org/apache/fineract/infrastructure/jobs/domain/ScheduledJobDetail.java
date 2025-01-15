@@ -18,22 +18,31 @@
  */
 package org.apache.fineract.infrastructure.jobs.domain;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Table;
+import jakarta.persistence.Temporal;
+import jakarta.persistence.TemporalType;
+import jakarta.persistence.UniqueConstraint;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.Table;
-import javax.persistence.Temporal;
-import javax.persistence.TemporalType;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import lombok.experimental.Accessors;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.domain.AbstractPersistableCustom;
 import org.apache.fineract.infrastructure.jobs.api.SchedulerJobApiConstants;
 
 @Entity
-@Table(name = "job")
-public class ScheduledJobDetail extends AbstractPersistableCustom {
+@Table(name = "job", uniqueConstraints = { @UniqueConstraint(columnNames = { "short_name" }, name = "job_short_name_key") })
+@Getter
+@Setter
+@NoArgsConstructor
+@Accessors(chain = true)
+public class ScheduledJobDetail extends AbstractPersistableCustom<Long> {
 
     @Column(name = "name")
     private String jobName;
@@ -89,81 +98,8 @@ public class ScheduledJobDetail extends AbstractPersistableCustom {
     @Column(name = "is_misfired")
     private boolean triggerMisfired;
 
-    protected ScheduledJobDetail() {
-
-    }
-
-    public String getJobName() {
-        return this.jobName;
-    }
-
-    public String getCronExpression() {
-        return this.cronExpression;
-    }
-
-    public Short getTaskPriority() {
-        return this.taskPriority;
-    }
-
-    public String getGroupName() {
-        return this.groupName;
-    }
-
-    public String getJobKey() {
-        return this.jobKey;
-    }
-
-    public Short getSchedulerGroup() {
-        return this.schedulerGroup;
-    }
-
-    public boolean isActiveSchedular() {
-        return this.activeSchedular;
-    }
-
-    public void updateCronExpression(final String cronExpression) {
-        this.cronExpression = cronExpression;
-    }
-
-    public void updatePreviousRunStartTime(final Date previousRunStartTime) {
-        this.previousRunStartTime = previousRunStartTime;
-    }
-
-    public Date getNextRunTime() {
-        return this.nextRunTime;
-    }
-
-    public void updateNextRunTime(final Date nextRunTime) {
-        this.nextRunTime = nextRunTime;
-    }
-
-    public void updateJobKey(final String jobKey) {
-        this.jobKey = jobKey;
-    }
-
-    public boolean getIsMismatchedJob() {
-        return this.isMismatchedJob;
-    }
-
-    public void setIsMismatchedJob(final boolean isMismatchedJob) {
-        this.isMismatchedJob = isMismatchedJob;
-    }
-
-    public void updateErrorLog(final String errorLog) {
-        this.errorLog = errorLog;
-    }
-
-    public boolean isCurrentlyRunning() {
-        return this.currentlyRunning;
-    }
-
-    public void updateCurrentlyRunningStatus(final boolean currentlyRunning) {
-        this.currentlyRunning = currentlyRunning;
-    }
-
-    public Integer getNodeId() {
-        return this.nodeId;
-    }
+    @Column(name = "short_name", nullable = false)
+    private String shortName;
 
     public Map<String, Object> update(final JsonCommand command) {
         final Map<String, Object> actualChanges = new LinkedHashMap<>(9);
@@ -186,14 +122,6 @@ public class ScheduledJobDetail extends AbstractPersistableCustom {
         }
 
         return actualChanges;
-    }
-
-    public boolean isTriggerMisfired() {
-        return this.triggerMisfired;
-    }
-
-    public void updateTriggerMisfired(final boolean triggerMisfired) {
-        this.triggerMisfired = triggerMisfired;
     }
 
 }

@@ -18,34 +18,41 @@
  */
 package org.apache.fineract;
 
+import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.RETURNS_MOCKS;
 import static org.mockito.Mockito.mock;
 
 import com.zaxxer.hikari.HikariDataSource;
-import javax.sql.DataSource;
+import java.util.List;
+import liquibase.change.custom.CustomTaskChange;
+import okhttp3.OkHttpClient;
 import org.apache.fineract.infrastructure.core.config.FineractProperties;
 import org.apache.fineract.infrastructure.core.domain.FineractPlatformTenant;
 import org.apache.fineract.infrastructure.core.service.database.DatabaseIndependentQueryService;
+import org.apache.fineract.infrastructure.core.service.database.DatabasePasswordEncryptor;
+import org.apache.fineract.infrastructure.core.service.database.DatabaseType;
+import org.apache.fineract.infrastructure.core.service.database.DatabaseTypeResolver;
+import org.apache.fineract.infrastructure.core.service.database.RoutingDataSource;
 import org.apache.fineract.infrastructure.core.service.migration.ExtendedSpringLiquibaseFactory;
 import org.apache.fineract.infrastructure.core.service.migration.TenantDataSourceFactory;
 import org.apache.fineract.infrastructure.core.service.migration.TenantDatabaseStateVerifier;
 import org.apache.fineract.infrastructure.core.service.migration.TenantDatabaseUpgradeService;
+import org.apache.fineract.infrastructure.core.service.tenant.TenantDetailsService;
+import org.apache.fineract.infrastructure.dataqueries.service.GenericDataService;
 import org.apache.fineract.infrastructure.jobs.ScheduledJobRunnerConfig;
 import org.apache.fineract.infrastructure.jobs.service.JobRegisterService;
-import org.apache.fineract.infrastructure.security.service.TenantDetailsService;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
-import org.springframework.batch.core.configuration.ListableJobLocator;
-import org.springframework.batch.core.configuration.annotation.BatchConfigurer;
-import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
-import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
+import org.springframework.batch.core.configuration.JobRegistry;
 import org.springframework.batch.core.explore.JobExplorer;
 import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.core.launch.JobOperator;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.autoconfigure.batch.BatchAutoConfiguration;
 import org.springframework.boot.autoconfigure.gson.GsonAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration;
@@ -59,6 +66,7 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Primary;
+import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
@@ -71,7 +79,7 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 @Configuration
 @EnableAutoConfiguration(exclude = { DataSourceAutoConfiguration.class, HibernateJpaAutoConfiguration.class,
         DataSourceTransactionManagerAutoConfiguration.class, GsonAutoConfiguration.class, JdbcTemplateAutoConfiguration.class,
-        LiquibaseAutoConfiguration.class })
+        LiquibaseAutoConfiguration.class, BatchAutoConfiguration.class })
 @EnableTransactionManagement
 @EnableWebSecurity
 @EnableConfigurationProperties({ FineractProperties.class, LiquibaseProperties.class })
@@ -82,45 +90,42 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 public class TestConfiguration {
 
     @Bean
-    public TenantDataSourceFactory tenantDataSourceFactory() {
-        return new TenantDataSourceFactory(null) {
+    public TenantDataSourceFactory tenantDataSourceFactory(DatabasePasswordEncryptor databasePasswordEncryptor) {
+        return new TenantDataSourceFactory(null, databasePasswordEncryptor) {
 
             @Override
-            public DataSource create(FineractPlatformTenant tenant) {
-                return mock(DataSource.class);
+            public HikariDataSource create(FineractPlatformTenant tenant) {
+                return mock(HikariDataSource.class);
             }
         };
     }
 
     @Primary
     @Bean
-    public JobBuilderFactory jobBuilderFactory() {
-        return mock(JobBuilderFactory.class, RETURNS_MOCKS);
-    }
-
-    @Primary
-    @Bean
-    public JobExplorer jobExplorer() {
-        return mock(JobExplorer.class, RETURNS_MOCKS);
-    }
-
-    @Primary
-    @Bean
-    public JobLauncher jobLauncher() {
-        return mock(JobLauncher.class, RETURNS_MOCKS);
-    }
-
-    @Primary
-    @Bean
-    public StepBuilderFactory stepBuilderFactory() {
-        return mock(StepBuilderFactory.class, RETURNS_MOCKS);
-    }
-
-    @Bean
     public HikariDataSource tenantDataSource() {
-        return mock(HikariDataSource.class, Mockito.RETURNS_MOCKS);
+        HikariDataSource mockDataSource = mock(HikariDataSource.class, Mockito.RETURNS_MOCKS);
+        return mockDataSource;
     }
 
+    /**
+     * DataSource with Mockito RETURNS_MOCKS black magic.
+     */
+    @Bean
+    public RoutingDataSource hikariTenantDataSource() {
+        RoutingDataSource mockDataSource = mock(RoutingDataSource.class, Mockito.RETURNS_MOCKS);
+        return mockDataSource;
+    }
+
+    @Primary
+    @Bean
+    public DatabaseTypeResolver databaseTypeResolver() {
+        DatabaseTypeResolver mock = mock(DatabaseTypeResolver.class, RETURNS_MOCKS);
+        given(mock.databaseType()).willReturn(DatabaseType.POSTGRESQL);
+        given(mock.isPostgreSQL()).willReturn(true);
+        return mock;
+    }
+
+    @Primary
     @Bean
     public TenantDetailsService tenantDetailsService() {
         return mock(TenantDetailsService.class, Mockito.RETURNS_MOCKS);
@@ -138,8 +143,8 @@ public class TestConfiguration {
 
     @Bean
     public TenantDatabaseStateVerifier tenantDatabaseStateVerifier(DatabaseIndependentQueryService databaseIndependentQueryService,
-            LiquibaseProperties liquibaseProperties, FineractProperties fineractProperties) {
-        return new TenantDatabaseStateVerifier(liquibaseProperties, databaseIndependentQueryService, fineractProperties);
+            LiquibaseProperties liquibaseProperties, DatabaseTypeResolver databaseTypeResolver) {
+        return new TenantDatabaseStateVerifier(liquibaseProperties, databaseIndependentQueryService, databaseTypeResolver);
     }
 
     /**
@@ -150,9 +155,10 @@ public class TestConfiguration {
     public TenantDatabaseUpgradeService tenantDatabaseUpgradeService(TenantDetailsService tenantDetailsService,
             HikariDataSource tenantDataSource, TenantDatabaseStateVerifier tenantDatabaseStateVerifier,
             ExtendedSpringLiquibaseFactory liquibaseFactory, TenantDataSourceFactory tenantDataSourceFactory,
-            FineractProperties fineractProperties) {
+            FineractProperties fineractProperties, Environment environment,
+            List<CustomTaskChange> customTaskChangesForDependencyInjection) {
         return new TenantDatabaseUpgradeService(tenantDetailsService, tenantDataSource, fineractProperties, tenantDatabaseStateVerifier,
-                liquibaseFactory, tenantDataSourceFactory);
+                liquibaseFactory, tenantDataSourceFactory, environment, customTaskChangesForDependencyInjection);
     }
 
     /**
@@ -165,15 +171,6 @@ public class TestConfiguration {
         return mockJobRegisterService;
     }
 
-    /**
-     * DataSource with Mockito RETURNS_MOCKS black magic.
-     */
-    @Bean
-    public DataSource hikariTenantDataSource() {
-        DataSource mockDataSource = mock(DataSource.class, Mockito.RETURNS_MOCKS);
-        return mockDataSource;
-    }
-
     @Bean
     public JdbcTemplate jdbcTemplate() {
         return mock(JdbcTemplate.class);
@@ -181,19 +178,43 @@ public class TestConfiguration {
 
     @Primary
     @Bean
-    public BatchConfigurer batchConfigurer() {
-        return mock(BatchConfigurer.class, RETURNS_MOCKS);
+    public JobExplorer jobExplorer() {
+        return mock(JobExplorer.class, RETURNS_MOCKS);
     }
 
     @Primary
     @Bean
-    public ListableJobLocator listableJobLocator() {
-        return mock(ListableJobLocator.class, RETURNS_MOCKS);
+    public JobLauncher jobLauncher() {
+        return mock(JobLauncher.class, RETURNS_MOCKS);
+    }
+
+    @Primary
+    @Bean
+    public JobRegistry jobRegistry() {
+        return mock(JobRegistry.class, RETURNS_MOCKS);
     }
 
     @Primary
     @Bean
     public JobRepository jobRepository() {
         return mock(JobRepository.class, RETURNS_MOCKS);
+    }
+
+    @Primary
+    @Bean
+    public JobOperator jobOperator() {
+        return mock(JobOperator.class, RETURNS_MOCKS);
+    }
+
+    @Primary
+    @Bean
+    public OkHttpClient okHttpClient() {
+        return mock(OkHttpClient.class, RETURNS_MOCKS);
+    }
+
+    @Primary
+    @Bean
+    public GenericDataService genericDataService() {
+        return mock(GenericDataService.class, RETURNS_MOCKS);
     }
 }

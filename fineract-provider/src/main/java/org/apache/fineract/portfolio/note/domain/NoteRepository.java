@@ -26,6 +26,8 @@ import org.apache.fineract.portfolio.loanaccount.domain.LoanTransaction;
 import org.apache.fineract.portfolio.savings.domain.SavingsAccount;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface NoteRepository extends JpaRepository<Note, Long>, JpaSpecificationExecutor<Note> {
 
@@ -45,5 +47,9 @@ public interface NoteRepository extends JpaRepository<Note, Long>, JpaSpecificat
 
     List<Note> findBySavingsAccount(SavingsAccount savingAccount);
 
-    // Note findBySavingsAccountIdAndId(Long savingAccountId, Long id);
+    Note findBySavingsAccountAndId(SavingsAccount savingAccount, Long id);
+
+    @Query("select note from Note note where note.savingsTransaction.id = :savingsTransactionId")
+    List<Note> findBySavingsTransactionId(@Param("savingsTransactionId") Long savingsTransactionId);
+
 }

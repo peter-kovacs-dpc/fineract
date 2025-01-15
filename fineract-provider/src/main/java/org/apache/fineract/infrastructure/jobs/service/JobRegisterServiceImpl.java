@@ -19,20 +19,27 @@
 package org.apache.fineract.infrastructure.jobs.service;
 
 import com.google.common.base.Splitter;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.text.ParseException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 import java.util.TimeZone;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.infrastructure.core.config.FineractProperties;
 import org.apache.fineract.infrastructure.core.domain.FineractPlatformTenant;
+import org.apache.fineract.infrastructure.core.exception.JobIsNotFoundOrNotEnabledException;
 import org.apache.fineract.infrastructure.core.exception.PlatformInternalServerException;
 import org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil;
+import org.apache.fineract.infrastructure.jobs.data.JobParameterDTO;
 import org.apache.fineract.infrastructure.jobs.domain.ScheduledJobDetail;
 import org.apache.fineract.infrastructure.jobs.domain.SchedulerDetail;
 import org.apache.fineract.infrastructure.jobs.exception.JobNodeIdMismatchingException;
 import org.apache.fineract.infrastructure.jobs.exception.JobNotFoundException;
+import org.apache.fineract.infrastructure.jobs.service.jobname.JobNameData;
+import org.apache.fineract.infrastructure.jobs.service.jobname.JobNameService;
 import org.quartz.JobDataMap;
 import org.quartz.JobDetail;
 import org.quartz.JobKey;
@@ -43,6 +50,7 @@ import org.quartz.Trigger;
 import org.quartz.TriggerListener;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.configuration.JobLocator;
+import org.springframework.batch.core.launch.NoSuchJobException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.event.ContextClosedEvent;
@@ -59,6 +67,8 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class JobRegisterServiceImpl implements JobRegisterService, ApplicationListener<ContextClosedEvent> {
 
+    private static final String JOB_EXECUTION_FAILED_MESSAGE = "Job execution failed for job with name: ";
+
     @Autowired
     private SchedularWritePlatformService schedularWritePlatformService;
 
@@ -68,10 +78,7 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
     @Autowired
     private SchedulerTriggerListener globalSchedulerTriggerListener;
 
-    private final HashMap<String, Scheduler> schedulers = new HashMap<>(4);
-
-    // This cannot be injected as Autowired due to circular dependency
-    private SchedulerStopListener schedulerStopListener = new SchedulerStopListener(this);
+    private static final HashMap<String, Scheduler> SCHEDULERS = new HashMap<>(4);
 
     @Autowired
     private FineractProperties fineractProperties;
@@ -82,9 +89,16 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
     @Autowired
     private JobStarter jobStarter;
 
+    @Autowired
+    private JobParameterDataParser dataParser;
+
+    @Autowired
+    private JobNameService jobNameService;
+
     private static final String JOB_STARTER_METHOD_NAME = "run";
 
-    public void executeJob(final ScheduledJobDetail scheduledJobDetail, String triggerType) {
+    @SuppressFBWarnings("SLF4J_SIGN_ONLY_FORMAT")
+    public void executeJob(final ScheduledJobDetail scheduledJobDetail, String triggerType, Set<JobParameterDTO> jobParameterDTOSet) {
         try {
             final JobDataMap jobDataMap = new JobDataMap();
             if (triggerType == null) {
@@ -93,24 +107,29 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
             jobDataMap.put(SchedulerServiceConstants.TRIGGER_TYPE_REFERENCE, triggerType);
             jobDataMap.put(SchedulerServiceConstants.TENANT_IDENTIFIER, ThreadLocalContextUtil.getTenant().getTenantIdentifier());
             final String schedulerName = getSchedulerName(scheduledJobDetail);
-            final Scheduler scheduler = this.schedulers.get(schedulerName);
-            final JobDetail jobDetail = createJobDetail(scheduledJobDetail);
+            final Scheduler scheduler = SCHEDULERS.get(schedulerName);
+            final JobDetail jobDetail = createJobDetail(scheduledJobDetail, jobParameterDTOSet);
             JobKey jobKey = jobDetail.getKey();
             if (scheduler == null || !scheduler.checkExists(jobKey)) {
+                SchedulerStopListener schedulerStopListener = new SchedulerStopListener(this);
                 final String tempSchedulerName = "temp" + scheduledJobDetail.getId();
                 final Scheduler tempScheduler = createScheduler(tempSchedulerName, 1, schedulerJobListener, schedulerStopListener);
                 jobDataMap.put(SchedulerServiceConstants.SCHEDULER_NAME, tempSchedulerName);
-                schedulers.put(tempSchedulerName, tempScheduler);
+                SCHEDULERS.put(tempSchedulerName, tempScheduler);
                 tempScheduler.addJob(jobDetail, true);
                 tempScheduler.triggerJob(jobKey, jobDataMap);
             } else {
                 scheduler.addJob(jobDetail, true);
                 scheduler.triggerJob(jobKey, jobDataMap);
             }
+        } catch (JobIsNotFoundOrNotEnabledException e) {
+            final String msg = "Job is not found or it is disabled with job ID: " + scheduledJobDetail.getId();
+            log.error("{}", msg, e);
+            throw e;
         } catch (final Exception e) {
             final String msg = "Job execution failed for job with id:" + scheduledJobDetail.getId();
             log.error("{}", msg, e);
-            throw new PlatformInternalServerException("error.msg.sheduler.job.execution.failed", msg, scheduledJobDetail.getId(), e);
+            throw new PlatformInternalServerException("error.msg.scheduler.job.execution.failed", msg, scheduledJobDetail.getId(), e);
         }
 
     }
@@ -120,15 +139,15 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
             final String jobIdentity = scheduledJobDetail.getJobKey();
             final JobKey jobKey = constructJobKey(jobIdentity);
             final String schedulername = getSchedulerName(scheduledJobDetail);
-            final Scheduler scheduler = this.schedulers.get(schedulername);
+            final Scheduler scheduler = SCHEDULERS.get(schedulername);
             if (scheduler != null) {
                 scheduler.deleteJob(jobKey);
             }
             scheduleJob(scheduledJobDetail);
             this.schedularWritePlatformService.saveOrUpdate(scheduledJobDetail);
-        } catch (final Throwable throwable) {
+        } catch (final Exception throwable) {
             final String stackTrace = getStackTraceAsString(throwable);
-            scheduledJobDetail.updateErrorLog(stackTrace);
+            scheduledJobDetail.setErrorLog(stackTrace);
             this.schedularWritePlatformService.saveOrUpdate(scheduledJobDetail);
         }
     }
@@ -137,7 +156,7 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
     public void pauseScheduler() {
         final SchedulerDetail schedulerDetail = this.schedularWritePlatformService.retriveSchedulerDetail();
         if (!schedulerDetail.isSuspended()) {
-            schedulerDetail.updateSuspendedState(true);
+            schedulerDetail.setSuspended(true);
             this.schedularWritePlatformService.updateSchedulerDetail(schedulerDetail);
         }
     }
@@ -146,19 +165,19 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
     public void startScheduler() {
         final SchedulerDetail schedulerDetail = this.schedularWritePlatformService.retriveSchedulerDetail();
         if (schedulerDetail.isSuspended()) {
-            schedulerDetail.updateSuspendedState(false);
+            schedulerDetail.setSuspended(false);
             this.schedularWritePlatformService.updateSchedulerDetail(schedulerDetail);
             if (schedulerDetail.isExecuteInstructionForMisfiredJobs()) {
                 final List<ScheduledJobDetail> scheduledJobDetails = this.schedularWritePlatformService
                         .retrieveAllJobs(fineractProperties.getNodeId());
                 for (final ScheduledJobDetail jobDetail : scheduledJobDetails) {
-                    if (jobDetail.isTriggerMisfired() || jobDetail.getIsMismatchedJob()) {
+                    if (jobDetail.isTriggerMisfired()) {
                         if (jobDetail.isActiveSchedular()) {
-                            executeJob(jobDetail, SchedulerServiceConstants.TRIGGER_TYPE_CRON);
-                            jobDetail.setIsMismatchedJob(false);
+                            executeJob(jobDetail, SchedulerServiceConstants.TRIGGER_TYPE_CRON, Collections.emptySet());
+                            jobDetail.setMismatchedJob(false);
                         }
                         final String schedulerName = getSchedulerName(jobDetail);
-                        final Scheduler scheduler = this.schedulers.get(schedulerName);
+                        final Scheduler scheduler = SCHEDULERS.get(schedulerName);
                         if (scheduler != null) {
                             final String key = jobDetail.getJobKey();
                             final JobKey jobKey = constructJobKey(key);
@@ -166,14 +185,14 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
                                 final List<? extends Trigger> triggers = scheduler.getTriggersOfJob(jobKey);
                                 for (final Trigger trigger : triggers) {
                                     if (trigger.getNextFireTime() != null && trigger.getNextFireTime().after(jobDetail.getNextRunTime())) {
-                                        jobDetail.updateNextRunTime(trigger.getNextFireTime());
+                                        jobDetail.setNextRunTime(trigger.getNextFireTime());
                                     }
                                 }
                             } catch (final SchedulerException e) {
                                 log.error("Error occured.", e);
                             }
                         }
-                        jobDetail.updateTriggerMisfired(false);
+                        jobDetail.setTriggerMisfired(false);
                         this.schedularWritePlatformService.saveOrUpdate(jobDetail);
                     }
                 }
@@ -188,14 +207,15 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
         if (nodeIdStored.equals(fineractProperties.getNodeId()) || nodeIdStored.equals("0")) {
             rescheduleJob(scheduledJobDetail);
         } else {
-            scheduledJobDetail.setIsMismatchedJob(true);
+            scheduledJobDetail.setMismatchedJob(true);
             this.schedularWritePlatformService.saveOrUpdate(scheduledJobDetail);
             throw new JobNodeIdMismatchingException(nodeIdStored, fineractProperties.getNodeId());
         }
     }
 
     @Override
-    public void executeJob(final Long jobId) {
+    public void executeJobWithParameters(final Long jobId, String jobParametersJson) {
+        Set<JobParameterDTO> jobParameterDTOSet = dataParser.parseExecution(jobParametersJson);
         final ScheduledJobDetail scheduledJobDetail = this.schedularWritePlatformService.findByJobId(jobId);
         if (scheduledJobDetail == null) {
             throw new JobNotFoundException(String.valueOf(jobId));
@@ -203,11 +223,9 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
         final String nodeIdStored = scheduledJobDetail.getNodeId().toString();
 
         if (nodeIdStored.equals(fineractProperties.getNodeId()) || nodeIdStored.equals("0")) {
-            executeJob(scheduledJobDetail, null);
-            scheduledJobDetail.setIsMismatchedJob(false);
-            this.schedularWritePlatformService.saveOrUpdate(scheduledJobDetail);
+            executeJob(scheduledJobDetail, null, jobParameterDTOSet);
         } else {
-            scheduledJobDetail.setIsMismatchedJob(true);
+            scheduledJobDetail.setMismatchedJob(true);
             this.schedularWritePlatformService.saveOrUpdate(scheduledJobDetail);
             throw new JobNodeIdMismatchingException(nodeIdStored, fineractProperties.getNodeId());
         }
@@ -231,31 +249,31 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
     @Override
     public void scheduleJob(final ScheduledJobDetail scheduledJobDetails) {
         try {
-            final JobDetail jobDetail = createJobDetail(scheduledJobDetails);
-            scheduledJobDetails.updateJobKey(getJobKeyAsString(jobDetail.getKey()));
+            final JobDetail jobDetail = createJobDetail(scheduledJobDetails, Collections.emptySet());
+            scheduledJobDetails.setJobKey(getJobKeyAsString(jobDetail.getKey()));
             if (!scheduledJobDetails.isActiveSchedular()) {
-                scheduledJobDetails.updateNextRunTime(null);
-                scheduledJobDetails.updateCurrentlyRunningStatus(false);
+                scheduledJobDetails.setNextRunTime(null);
+                scheduledJobDetails.setCurrentlyRunning(false);
                 return;
             }
 
             final Trigger trigger = createTrigger(scheduledJobDetails, jobDetail);
             final Scheduler scheduler = getScheduler(scheduledJobDetails);
             scheduler.scheduleJob(jobDetail, trigger);
-            scheduledJobDetails.updateNextRunTime(trigger.getNextFireTime());
-            scheduledJobDetails.updateErrorLog(null);
-        } catch (final Throwable throwable) {
-            scheduledJobDetails.updateNextRunTime(null);
+            scheduledJobDetails.setNextRunTime(trigger.getNextFireTime());
+            scheduledJobDetails.setErrorLog(null);
+        } catch (final Exception throwable) {
+            scheduledJobDetails.setNextRunTime(null);
             final String stackTrace = getStackTraceAsString(throwable);
-            scheduledJobDetails.updateErrorLog(stackTrace);
+            scheduledJobDetails.setErrorLog(stackTrace);
             log.error("Could not schedule job: {}", scheduledJobDetails.getJobName(), throwable);
         }
-        scheduledJobDetails.updateCurrentlyRunningStatus(false);
+        scheduledJobDetails.setCurrentlyRunning(false);
     }
 
     @Override
     public void stopAllSchedulers() {
-        for (Scheduler scheduler : this.schedulers.values()) {
+        for (Scheduler scheduler : SCHEDULERS.values()) {
             try {
                 scheduler.shutdown();
             } catch (final SchedulerException e) {
@@ -266,21 +284,21 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
 
     private Scheduler getScheduler(final ScheduledJobDetail scheduledJobDetail) throws Exception {
         final String schedulername = getSchedulerName(scheduledJobDetail);
-        Scheduler scheduler = this.schedulers.get(schedulername);
+        Scheduler scheduler = SCHEDULERS.get(schedulername);
         if (scheduler == null) {
             int noOfThreads = SchedulerServiceConstants.DEFAULT_THREAD_COUNT;
             if (scheduledJobDetail.getSchedulerGroup() > 0) {
                 noOfThreads = SchedulerServiceConstants.GROUP_THREAD_COUNT;
             }
             scheduler = createScheduler(schedulername, noOfThreads, schedulerJobListener);
-            this.schedulers.put(schedulername, scheduler);
+            SCHEDULERS.put(schedulername, scheduler);
         }
         return scheduler;
     }
 
     @Override
     public void stopScheduler(final String name) {
-        final Scheduler scheduler = this.schedulers.remove(name);
+        final Scheduler scheduler = SCHEDULERS.remove(name);
         try {
             scheduler.shutdown();
         } catch (final SchedulerException e) {
@@ -312,11 +330,17 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
         return schedulerFactoryBean.getScheduler();
     }
 
-    private JobDetail createJobDetail(final ScheduledJobDetail scheduledJobDetail) throws Exception {
+    private JobDetail createJobDetail(final ScheduledJobDetail scheduledJobDetail, Set<JobParameterDTO> jobParameterDTOSet)
+            throws Exception {
         final FineractPlatformTenant tenant = ThreadLocalContextUtil.getTenant();
 
-        JobName jobName = JobName.getJobByName(scheduledJobDetail.getJobName());
-        Job job = jobLocator.getJob(jobName.name());
+        JobNameData jobName = jobNameService.getJobByHumanReadableName(scheduledJobDetail.getJobName());
+        Job job;
+        try {
+            job = jobLocator.getJob(jobName.getEnumStyleName());
+        } catch (NoSuchJobException e) {
+            throw new JobIsNotFoundOrNotEnabledException(e, jobName.getEnumStyleName());
+        }
 
         final MethodInvokingJobDetailFactoryBean jobDetailFactoryBean = new MethodInvokingJobDetailFactoryBean();
         jobDetailFactoryBean.setName(scheduledJobDetail.getJobName() + "JobDetail" + tenant.getId());
@@ -325,7 +349,7 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
         jobDetailFactoryBean.setGroup(scheduledJobDetail.getGroupName());
         jobDetailFactoryBean.setConcurrent(false);
 
-        jobDetailFactoryBean.setArguments(job, scheduledJobDetail, ThreadLocalContextUtil.getContext());
+        jobDetailFactoryBean.setArguments(job, scheduledJobDetail, jobParameterDTOSet);
         jobDetailFactoryBean.afterPropertiesSet();
         return jobDetailFactoryBean.getObject();
     }
@@ -363,7 +387,6 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
 
     private JobKey constructJobKey(final String Key) {
         final List<String> keyParams = Splitter.onPattern(SchedulerServiceConstants.JOB_KEY_SEPERATOR).splitToList(Key);
-        final JobKey jobKey = new JobKey(keyParams.get(0), keyParams.get(1));
-        return jobKey;
+        return new JobKey(keyParams.get(0), keyParams.get(1));
     }
 }

@@ -18,16 +18,17 @@
  */
 package org.apache.fineract.infrastructure.configuration.domain;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Table;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.experimental.Accessors;
+import org.apache.fineract.infrastructure.configuration.api.GlobalConfigurationConstants;
 import org.apache.fineract.infrastructure.configuration.data.GlobalConfigurationPropertyData;
 import org.apache.fineract.infrastructure.configuration.exception.GlobalConfigurationPropertyCannotBeModfied;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
@@ -40,7 +41,7 @@ import org.apache.fineract.infrastructure.security.exception.ForcePasswordResetE
 @Setter
 @NoArgsConstructor
 @Accessors(chain = true)
-public class GlobalConfigurationProperty extends AbstractPersistableCustom {
+public class GlobalConfigurationProperty extends AbstractPersistableCustom<Long> {
 
     @Column(name = "name", nullable = false)
     private String name;
@@ -64,10 +65,9 @@ public class GlobalConfigurationProperty extends AbstractPersistableCustom {
     private boolean isTrapDoor;
 
     public Map<String, Object> update(final JsonCommand command) {
-
         final Map<String, Object> actualChanges = new LinkedHashMap<>(7);
 
-        if (this.isTrapDoor == true) {
+        if (this.isTrapDoor) {
             throw new GlobalConfigurationPropertyCannotBeModfied(this.getId());
         }
 
@@ -100,7 +100,7 @@ public class GlobalConfigurationProperty extends AbstractPersistableCustom {
             this.stringValue = newStringValue;
         }
 
-        final String passwordPropertyName = "force-password-reset-days";
+        final String passwordPropertyName = GlobalConfigurationConstants.FORCE_PASSWORD_RESET_DAYS;
         if (this.name.equalsIgnoreCase(passwordPropertyName)) {
             if ((this.enabled == true && command.hasParameter(valueParamName) && (this.value == 0))
                     || (this.enabled == true && !command.hasParameter(valueParamName) && (previousValue == 0))) {
@@ -109,7 +109,6 @@ public class GlobalConfigurationProperty extends AbstractPersistableCustom {
         }
 
         return actualChanges;
-
     }
 
     public static GlobalConfigurationProperty newSurveyConfiguration(final String name) {
@@ -120,6 +119,5 @@ public class GlobalConfigurationProperty extends AbstractPersistableCustom {
         return new GlobalConfigurationPropertyData().setName(getName()).setEnabled(isEnabled()).setValue(getValue())
                 .setDateValue(getDateValue()).setStringValue(getStringValue()).setId(this.getId()).setDescription(this.description)
                 .setTrapDoor(this.isTrapDoor);
-
     }
 }

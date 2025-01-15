@@ -18,6 +18,7 @@
  */
 package org.apache.fineract.infrastructure.instancemode.api;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -25,21 +26,22 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import javax.ws.rs.Consumes;
-import javax.ws.rs.PUT;
-import javax.ws.rs.Path;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.fineract.infrastructure.core.boot.FineractProfiles;
 import org.apache.fineract.infrastructure.core.config.FineractProperties;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
-@Profile("test")
+@Profile(FineractProfiles.TEST)
 @Component
-@Path("/instance-mode")
+@Path("/v1/instance-mode")
 @Tag(name = "Instance Mode", description = "Instance mode changing API")
 @RequiredArgsConstructor
 @Slf4j
@@ -48,6 +50,7 @@ public class InstanceModeApiResource implements InitializingBean {
     private final FineractProperties fineractProperties;
 
     @Override
+    @SuppressFBWarnings("SLF4J_SIGN_ONLY_FORMAT")
     public void afterPropertiesSet() throws Exception {
         log.warn("------------------------------------------------------------");
         log.warn("                                                            ");
@@ -63,6 +66,7 @@ public class InstanceModeApiResource implements InitializingBean {
     @Operation(summary = "Changes the Fineract instance mode", description = "")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = InstanceModeApiResourceSwagger.ChangeInstanceModeRequest.class)))
     @ApiResponses({ @ApiResponse(responseCode = "200", description = "OK") })
+    @SuppressFBWarnings("SLF4J_SIGN_ONLY_FORMAT")
     public Response changeMode(InstanceModeApiResourceSwagger.ChangeInstanceModeRequest request) {
         log.warn("------------------------------------------------------------");
         log.warn("                                                            ");

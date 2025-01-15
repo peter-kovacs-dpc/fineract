@@ -24,6 +24,7 @@ import java.util.List;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
+import org.apache.fineract.portfolio.loanaccount.data.LoanChargeData;
 import org.apache.fineract.portfolio.loanaccount.data.LoanTransactionEnumData;
 
 @RequiredArgsConstructor
@@ -58,4 +59,10 @@ public class LoanTransactionDTO {
     private boolean isLoanToLoanTransfer;
 
     private final String chargeRefundChargeType;
+    private final LoanChargeData loanChargeData;
+
+    /** In case chargeback and overpayment the below field contains the distribution payment **/
+    private final BigDecimal principalPaid;
+    private final BigDecimal feePaid;
+    private final BigDecimal penaltyPaid;
 }

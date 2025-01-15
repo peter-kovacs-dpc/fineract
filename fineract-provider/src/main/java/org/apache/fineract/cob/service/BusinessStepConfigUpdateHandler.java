@@ -18,8 +18,6 @@
  */
 package org.apache.fineract.cob.service;
 
-import com.google.common.base.Splitter;
-import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.apache.fineract.cob.exceptions.BusinessStepException;
 import org.apache.fineract.cob.exceptions.BusinessStepNotBelongsToJobException;
@@ -40,11 +38,6 @@ public class BusinessStepConfigUpdateHandler implements NewCommandSourceHandler 
     @Override
     @Transactional
     public CommandProcessingResult processCommand(JsonCommand command) throws BusinessStepNotBelongsToJobException, BusinessStepException {
-        List<String> split = Splitter.on("/").splitToList(command.getUrl());
-        String jobName = split.get(split.size() - 2);
-        if ("null".equals(jobName)) {
-            jobName = null;
-        }
-        return configJobParameterService.updateStepConfigByJobName(command, jobName);
+        return configJobParameterService.updateStepConfigByJobName(command, command.getJobName());
     }
 }

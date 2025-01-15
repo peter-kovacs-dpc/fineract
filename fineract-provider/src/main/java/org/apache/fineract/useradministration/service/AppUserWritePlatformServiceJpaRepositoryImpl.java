@@ -18,14 +18,16 @@
  */
 package org.apache.fineract.useradministration.service;
 
+import static org.apache.fineract.useradministration.service.AppUserConstants.CLIENTS;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import jakarta.persistence.PersistenceException;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import javax.persistence.PersistenceException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.exception.ExceptionUtils;
@@ -34,6 +36,7 @@ import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.ApiParameterError;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuilder;
+import org.apache.fineract.infrastructure.core.exception.ErrorHandler;
 import org.apache.fineract.infrastructure.core.exception.PlatformApiDataValidationException;
 import org.apache.fineract.infrastructure.core.exception.PlatformDataIntegrityException;
 import org.apache.fineract.infrastructure.core.service.PlatformEmailSendException;
@@ -63,11 +66,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.security.authentication.AuthenticationServiceException;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.ObjectUtils;
 
-@Service
 @Slf4j
 @RequiredArgsConstructor
 public class AppUserWritePlatformServiceJpaRepositoryImpl implements AppUserWritePlatformService {
@@ -113,8 +114,8 @@ public class AppUserWritePlatformServiceJpaRepositoryImpl implements AppUserWrit
             Collection<Client> clients;
             if (command.hasParameter(AppUserConstants.IS_SELF_SERVICE_USER)
                     && command.booleanPrimitiveValueOfParameterNamed(AppUserConstants.IS_SELF_SERVICE_USER)
-                    && command.hasParameter(AppUserConstants.CLIENTS)) {
-                JsonArray clientsArray = command.arrayOfParameterNamed(AppUserConstants.CLIENTS);
+                    && command.hasParameter(CLIENTS)) {
+                JsonArray clientsArray = command.arrayOfParameterNamed(CLIENTS);
                 Collection<Long> clientIds = new HashSet<>();
                 for (JsonElement clientElement : clientsArray) {
                     clientIds.add(clientElement.getAsLong());
@@ -160,7 +161,7 @@ public class AppUserWritePlatformServiceJpaRepositoryImpl implements AppUserWrit
         try {
             this.context.authenticatedUser(new CommandWrapperBuilder().updateUser(null).build());
 
-            this.fromApiJsonDeserializer.validateForUpdate(command.json());
+            this.fromApiJsonDeserializer.validateForUpdate(command.json(), this.context.authenticatedUser());
 
             final AppUser userToUpdate = this.appUserRepository.findById(userId).orElseThrow(() -> new UserNotFoundException(userId));
 
@@ -172,8 +173,8 @@ public class AppUserWritePlatformServiceJpaRepositoryImpl implements AppUserWrit
                 isSelfServiceUser = command.booleanPrimitiveValueOfParameterNamed(AppUserConstants.IS_SELF_SERVICE_USER);
             }
 
-            if (isSelfServiceUser && command.hasParameter(AppUserConstants.CLIENTS)) {
-                JsonArray clientsArray = command.arrayOfParameterNamed(AppUserConstants.CLIENTS);
+            if (isSelfServiceUser && command.hasParameter(CLIENTS)) {
+                JsonArray clientsArray = command.arrayOfParameterNamed(CLIENTS);
                 Collection<Long> clientIds = new HashSet<>();
                 for (JsonElement clientElement : clientsArray) {
                     clientIds.add(clientElement.getAsLong());
@@ -285,28 +286,22 @@ public class AppUserWritePlatformServiceJpaRepositoryImpl implements AppUserWrit
     /*
      * Return an exception to throw, no matter what the data integrity issue is.
      */
-    private PlatformDataIntegrityException handleDataIntegrityIssues(final JsonCommand command, final Throwable realCause,
-            final Exception dve) {
+    private RuntimeException handleDataIntegrityIssues(final JsonCommand command, final Throwable realCause, final Exception dve) {
         // TODO: this needs to be fixed. The error condition should be independent from the underlying message and
-        // naming
-        // of the constraint
+        // naming of the constraint
         if (realCause.getMessage().contains("username_org")) {
             final String username = command.stringValueOfParameterNamed("username");
-            final StringBuilder defaultMessageBuilder = new StringBuilder("User with username ").append(username)
-                    .append(" already exists.");
-            return new PlatformDataIntegrityException("error.msg.user.duplicate.username", defaultMessageBuilder.toString(), "username",
-                    username);
+            final String defaultMessage = "User with username " + username + " already exists.";
+            return new PlatformDataIntegrityException("error.msg.user.duplicate.username", defaultMessage, "username", username);
         }
-
         // TODO: this needs to be fixed. The error condition should be independent from the underlying message and
-        // naming
-        // of the constraint
+        // naming of the constraint
         if (realCause.getMessage().contains("unique_self_client")) {
             return new PlatformDataIntegrityException("error.msg.user.self.service.user.already.exist",
                     "Self Service User Id is already created. Go to Admin->Users to edit or delete the self-service user.");
         }
 
         log.error("handleDataIntegrityIssues: Neither duplicate username nor existing user; unknown error occured", dve);
-        return new PlatformDataIntegrityException("error.msg.unknown.data.integrity.issue", "Unknown data integrity issue with resource.");
+        return ErrorHandler.getMappable(dve, "error.msg.unknown.data.integrity.issue", "Unknown data integrity issue with resource.");
     }
 }

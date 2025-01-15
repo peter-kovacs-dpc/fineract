@@ -18,13 +18,13 @@
  */
 package org.apache.fineract.infrastructure.bulkimport.domain;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToOne;
+import jakarta.persistence.Table;
 import java.time.LocalDateTime;
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.JoinColumn;
-import javax.persistence.ManyToOne;
-import javax.persistence.OneToOne;
-import javax.persistence.Table;
 import org.apache.fineract.infrastructure.core.domain.AbstractPersistableCustom;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.infrastructure.documentmanagement.domain.Document;
@@ -32,7 +32,7 @@ import org.apache.fineract.useradministration.domain.AppUser;
 
 @Entity
 @Table(name = "m_import_document")
-public class ImportDocument extends AbstractPersistableCustom {
+public class ImportDocument extends AbstractPersistableCustom<Long> {
 
     @OneToOne
     @JoinColumn(name = "document_id")
@@ -73,7 +73,7 @@ public class ImportDocument extends AbstractPersistableCustom {
         final Boolean completed = Boolean.FALSE;
         final Integer successCount = 0;
         final Integer failureCount = 0;
-        final LocalDateTime endTime = LocalDateTime.now(DateUtils.getDateTimeZoneOfTenant());
+        final LocalDateTime endTime = DateUtils.getLocalDateTimeOfTenant();
 
         return new ImportDocument(document, importTime, endTime, completed, entityType, createdBy, totalRecords, successCount,
                 failureCount);
