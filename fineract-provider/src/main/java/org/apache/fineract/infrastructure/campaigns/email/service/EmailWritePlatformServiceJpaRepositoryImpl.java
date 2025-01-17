@@ -19,6 +19,7 @@
 package org.apache.fineract.infrastructure.campaigns.email.service;
 
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
 import org.apache.fineract.infrastructure.campaigns.email.data.EmailDataValidator;
 import org.apache.fineract.infrastructure.campaigns.email.domain.EmailMessage;
 import org.apache.fineract.infrastructure.campaigns.email.domain.EmailMessageAssembler;
@@ -26,10 +27,10 @@ import org.apache.fineract.infrastructure.campaigns.email.domain.EmailMessageRep
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuilder;
+import org.apache.fineract.infrastructure.core.exception.ErrorHandler;
 import org.apache.fineract.infrastructure.core.exception.PlatformDataIntegrityException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.NonTransientDataAccessException;
 import org.springframework.orm.jpa.JpaSystemException;
@@ -37,6 +38,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
+@RequiredArgsConstructor
 public class EmailWritePlatformServiceJpaRepositoryImpl implements EmailWritePlatformService {
 
     private static final Logger LOG = LoggerFactory.getLogger(EmailWritePlatformServiceJpaRepositoryImpl.class);
@@ -44,14 +46,6 @@ public class EmailWritePlatformServiceJpaRepositoryImpl implements EmailWritePla
     private final EmailMessageAssembler assembler;
     private final EmailMessageRepository repository;
     private final EmailDataValidator validator;
-
-    @Autowired
-    public EmailWritePlatformServiceJpaRepositoryImpl(final EmailMessageAssembler assembler, final EmailMessageRepository repository,
-            final EmailDataValidator validator) {
-        this.assembler = assembler;
-        this.repository = repository;
-        this.validator = validator;
-    }
 
     @Transactional
     @Override
@@ -126,14 +120,13 @@ public class EmailWritePlatformServiceJpaRepositoryImpl implements EmailWritePla
      */
     private void handleDataIntegrityIssues(@SuppressWarnings("unused") final JsonCommand command, final Throwable realCause,
             final NonTransientDataAccessException dve) {
-
         if (realCause.getMessage().contains("email_address")) {
             throw new PlatformDataIntegrityException("error.msg.email.no.email.address.exists",
                     "The group, client or staff provided has no email address.", "id");
         }
 
         LOG.error("Error occured.", dve);
-        throw new PlatformDataIntegrityException("error.msg.email.unknown.data.integrity.issue",
+        throw ErrorHandler.getMappable(dve, "error.msg.email.unknown.data.integrity.issue",
                 "Unknown data integrity issue with resource: " + realCause.getMessage());
     }
 }

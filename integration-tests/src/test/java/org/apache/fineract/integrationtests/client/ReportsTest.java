@@ -27,6 +27,7 @@ import org.apache.fineract.integrationtests.common.Utils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import retrofit2.Response;
 
 /**
  * Integration Test for /runreports/ API.
@@ -42,13 +43,21 @@ public class ReportsTest extends IntegrationTest {
 
     @Test
     void listReports() {
-        assertThat(ok(fineract().reports.retrieveReportList())).hasSize(124);
+        assertThat(ok(fineract().reports.retrieveReportList())).hasSize(128);
     }
 
     @Test
     void runClientListingTableReport() {
         assertThat(ok(fineract().reportsRun.runReportGetData("Client Listing", Map.of("R_officeId", "1"), false)).getColumnHeaders().get(0)
                 .getColumnName()).isEqualTo("Office/Branch");
+    }
+
+    @Test
+    void runClientListingTableReportCSV() throws IOException {
+        Response<ResponseBody> result = okR(
+                fineract().reportsRun.runReportGetFile("Client Listing", Map.of("R_officeId", "1", "exportCSV", "true"), false));
+        assertThat(result.body().contentType()).isEqualTo(MediaType.parse("text/csv"));
+        assertThat(result.body().string()).contains("Office/Branch");
     }
 
     @Test // see FINERACT-1306
@@ -93,13 +102,13 @@ public class ReportsTest extends IntegrationTest {
     void testGeneralLedgerReportTableReportRunsSuccessfully() {
         assertThat(fineract().reportsRun.runReportGetData("GeneralLedgerReport Table",
                 Map.of("R_endDate", "2013-04-30", "R_officeId", "1", "R_startDate", "2013-04-16", "R_GLAccountNO", "1"), false))
-                        .hasHttpStatus(200);
+                .hasHttpStatus(200);
     }
 
     @Test
     void testBalanceSheetTableReportRunsSuccessfully() {
         assertThat(
                 fineract().reportsRun.runReportGetData("Balance Sheet Table", Map.of("R_endDate", "2013-04-30", "R_officeId", "1"), false))
-                        .hasHttpStatus(200);
+                .hasHttpStatus(200);
     }
 }

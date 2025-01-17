@@ -18,12 +18,12 @@
  */
 package org.apache.fineract.infrastructure.bulkimport.service;
 
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response.ResponseBuilder;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.Response.ResponseBuilder;
 import org.apache.fineract.accounting.glaccount.data.GLAccountData;
 import org.apache.fineract.accounting.glaccount.service.GLAccountReadPlatformService;
 import org.apache.fineract.infrastructure.bulkimport.constants.TemplatePopulateImportConstants;
@@ -180,7 +180,7 @@ public class BulkImportWorkbookPopulatorServiceImpl implements BulkImportWorkboo
         final Workbook workbook = new HSSFWorkbook();
         if (entityType != null) {
             if (entityType.trim().equalsIgnoreCase(GlobalEntityType.CLIENTS_PERSON.toString())
-                    || entityType.trim().equalsIgnoreCase(GlobalEntityType.CLIENTS_ENTTTY.toString())) {
+                    || entityType.trim().equalsIgnoreCase(GlobalEntityType.CLIENTS_ENTITY.toString())) {
                 populator = populateClientWorkbook(entityType, officeId, staffId);
             } else if (entityType.trim().equalsIgnoreCase(GlobalEntityType.CENTERS.toString())) {
                 populator = populateCenterWorkbook(officeId, staffId);
@@ -241,7 +241,7 @@ public class BulkImportWorkbookPopulatorServiceImpl implements BulkImportWorkboo
             return new ClientPersonWorkbookPopulator(new OfficeSheetPopulator(offices), new PersonnelSheetPopulator(staff, offices),
                     clientTypeCodeValues, genderCodeValues, clientClassification, addressTypesCodeValues, stateProvinceCodeValues,
                     countryCodeValues);
-        } else if (entityType.trim().equalsIgnoreCase(GlobalEntityType.CLIENTS_ENTTTY.toString())) {
+        } else if (entityType.trim().equalsIgnoreCase(GlobalEntityType.CLIENTS_ENTITY.toString())) {
             List<CodeValueData> constitutionCodeValues = fetchCodeValuesByCodeName("Constitution");
             List<CodeValueData> mainBusinessline = fetchCodeValuesByCodeName("Main Business Line");
             return new ClientEntityWorkbookPopulator(new OfficeSheetPopulator(offices), new PersonnelSheetPopulator(staff, offices),
@@ -271,8 +271,8 @@ public class BulkImportWorkbookPopulatorServiceImpl implements BulkImportWorkboo
         List<OfficeData> offices = null;
         if (officeId == null) {
             Boolean includeAllOffices = Boolean.TRUE;
-            offices = (List) this.officeReadPlatformService.retrieveAllOffices(includeAllOffices, new SearchParameters(null, null, null,
-                    null, null, null, null, null, null, "id", "asc", null, null, null, null, null, null));
+            offices = (List) this.officeReadPlatformService.retrieveAllOffices(includeAllOffices,
+                    SearchParameters.builder().orderBy("id").sortOrder("asc").build());
         } else {
             offices = new ArrayList<>();
             offices.add(this.officeReadPlatformService.retrieveOffice(officeId));
@@ -300,7 +300,7 @@ public class BulkImportWorkbookPopulatorServiceImpl implements BulkImportWorkboo
     private List<CodeValueData> fetchCodeValuesByCodeName(String codeName) {
         List<CodeValueData> codeValues = null;
         if (codeName != null) {
-            codeValues = (List<CodeValueData>) codeValueReadPlatformService.retrieveCodeValuesByCode(codeName);
+            codeValues = codeValueReadPlatformService.retrieveCodeValuesByCode(codeName);
         } else {
             throw new NullPointerException();
         }
@@ -341,7 +341,7 @@ public class BulkImportWorkbookPopulatorServiceImpl implements BulkImportWorkboo
         if (officeId == null) {
             centers = (List<CenterData>) this.centerReadPlatformService.retrieveAll(null, null);
         } else {
-            SearchParameters searchParameters = SearchParameters.from(null, officeId, null, null, null);
+            SearchParameters searchParameters = SearchParameters.builder().officeId(officeId).build();
             centers = (List<CenterData>) centerReadPlatformService.retrieveAll(searchParameters, null);
         }
 
@@ -359,7 +359,7 @@ public class BulkImportWorkbookPopulatorServiceImpl implements BulkImportWorkboo
                 }
             }
         } else {
-            SearchParameters searchParameters = SearchParameters.from(null, officeId, null, null, null);
+            SearchParameters searchParameters = SearchParameters.builder().officeId(officeId).build();
             Page<ClientData> clientDataPage = this.clientReadPlatformService.retrieveAll(searchParameters);
             if (clientDataPage != null) {
                 clients = new ArrayList<>();
@@ -420,7 +420,7 @@ public class BulkImportWorkbookPopulatorServiceImpl implements BulkImportWorkboo
         if (officeId == null) {
             groups = (List<GroupGeneralData>) this.groupReadPlatformService.retrieveAll(null, null);
         } else {
-            SearchParameters searchParameters = SearchParameters.from(null, officeId, null, null, null);
+            SearchParameters searchParameters = SearchParameters.builder().officeId(officeId).build();
             groups = (List<GroupGeneralData>) groupReadPlatformService.retrieveAll(searchParameters, null);
         }
 
@@ -448,7 +448,7 @@ public class BulkImportWorkbookPopulatorServiceImpl implements BulkImportWorkboo
         if (officeId == null) {
             loanAccounts = loanReadPlatformService.retrieveAll(null).getPageItems();
         } else {
-            SearchParameters searchParameters = SearchParameters.from(null, officeId, null, null, null);
+            SearchParameters searchParameters = SearchParameters.builder().officeId(officeId).build();
             loanAccounts = loanReadPlatformService.retrieveAll(searchParameters).getPageItems();
         }
         return loanAccounts;
@@ -488,12 +488,11 @@ public class BulkImportWorkbookPopulatorServiceImpl implements BulkImportWorkboo
 
     private List<SavingsAccountData> fetchSavingsAccounts(Long officeId) {
         List<SavingsAccountData> savingsAccounts = null;
-        String activeAccounts = "sa.status_enum = 300";
         if (officeId != null) {
-            SearchParameters searchParameters = SearchParameters.from(activeAccounts, officeId, null, null, null);
+            SearchParameters searchParameters = SearchParameters.builder().officeId(officeId).status("300").build();
             savingsAccounts = savingsAccountReadPlatformService.retrieveAll(searchParameters).getPageItems();
         } else {
-            SearchParameters searchParameters = SearchParameters.from(activeAccounts, null, null, null, null);
+            SearchParameters searchParameters = SearchParameters.builder().status("300").build();
             savingsAccounts = savingsAccountReadPlatformService.retrieveAll(searchParameters).getPageItems();
         }
         return savingsAccounts;

@@ -71,10 +71,10 @@ public class ReportMailingJobReadPlatformServiceImpl implements ReportMailingJob
         sqlStringBuilder.append(mapper.reportMailingJobSchema());
         sqlStringBuilder.append(" where rmj.is_deleted = false");
 
-        if (searchParameters.isOrderByRequested()) {
+        if (searchParameters.hasOrderBy()) {
             sqlStringBuilder.append(" order by ").append(searchParameters.getOrderBy());
             this.columnValidator.validateSqlInjection(sqlStringBuilder.toString(), searchParameters.getOrderBy());
-            if (searchParameters.isSortOrderProvided()) {
+            if (searchParameters.hasSortOrder()) {
                 sqlStringBuilder.append(" ").append(searchParameters.getSortOrder());
                 this.columnValidator.validateSqlInjection(sqlStringBuilder.toString(), searchParameters.getSortOrder());
             }
@@ -82,9 +82,9 @@ public class ReportMailingJobReadPlatformServiceImpl implements ReportMailingJob
             sqlStringBuilder.append(" order by rmj.name ");
         }
 
-        if (searchParameters.isLimited()) {
+        if (searchParameters.hasLimit()) {
             sqlStringBuilder.append(" ");
-            if (searchParameters.isOffset()) {
+            if (searchParameters.hasOffset()) {
                 sqlStringBuilder.append(sqlGenerator.limit(searchParameters.getLimit(), searchParameters.getOffset()));
             } else {
                 sqlStringBuilder.append(sqlGenerator.limit(searchParameters.getLimit()));
@@ -181,8 +181,10 @@ public class ReportMailingJobReadPlatformServiceImpl implements ReportMailingJob
             final String updatedByUsername = rs.getString("updatedByUsername");
             final String updatedByFirstname = rs.getString("updatedByFirstname");
             final String updatedByLastname = rs.getString("updatedByLastname");
-            final ReportMailingJobTimelineData timeline = new ReportMailingJobTimelineData(createdOnDate, createdByUsername,
-                    createdByFirstname, createdByLastname, updatedOnDate, updatedByUsername, updatedByFirstname, updatedByLastname);
+            final ReportMailingJobTimelineData timeline = new ReportMailingJobTimelineData().setCreatedOnDate(createdOnDate)
+                    .setCreatedByUsername(createdByUsername).setCreatedByFirstname(createdByFirstname)
+                    .setCreatedByLastname(createdByLastname).setUpdatedOnDate(updatedOnDate).setUpdatedByUsername(updatedByUsername)
+                    .setUpdatedByFirstname(updatedByFirstname).setUpdatedByLastname(updatedByLastname);
             final Long runAsUserId = JdbcSupport.getLong(rs, "runAsUserId");
 
             final Long reportId = JdbcSupport.getLong(rs, "reportId");

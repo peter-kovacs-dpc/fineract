@@ -25,8 +25,16 @@
     <property name="current_date" value="CURDATE()" context="mysql"/>
     <property name="current_date" value="CURRENT_DATE" context="postgresql"/>
     <property name="current_datetime" value="NOW()"/>
+    <property name="uuid" value="uuid()" context="mysql"/>
+    <property name="uuid" value="uuid_generate_v4()" context="postgresql"/>
     <include file="tenant-store/initial-switch-changelog-tenant-store.xml" relativeToChangelogFile="true" context="tenant_store_db AND initial_switch"/>
     <include file="tenant-store/changelog-tenant-store.xml" relativeToChangelogFile="true" context="tenant_store_db AND !initial_switch"/>
     <include file="tenant/initial-switch-changelog-tenant.xml" relativeToChangelogFile="true" context="tenant_db AND initial_switch"/>
     <include file="tenant/changelog-tenant.xml" relativeToChangelogFile="true" context="tenant_db AND !initial_switch"/>
+    <!-- Add new module to the end of this modules list (to keep the existing auto-increment identifiers) -->
+    <include file="db/changelog/tenant/module/loan/module-changelog-master.xml" context="tenant_db AND !initial_switch"/>
+    <include file="db/changelog/tenant/module/investor/module-changelog-master.xml" context="tenant_db AND !initial_switch"/>
+    <includeAll path="db/custom-changelog" errorIfMissingOrEmpty="false" context="tenant_db AND !initial_switch AND custom_changelog"/>
+    <!-- Scripts to run after the modules were initialized  -->
+    <include file="tenant/final-changelog-tenant.xml" relativeToChangelogFile="true" context="tenant_db AND !initial_switch"/>
 </databaseChangeLog>

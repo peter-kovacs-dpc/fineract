@@ -23,6 +23,7 @@ import com.google.gson.JsonObject;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import lombok.RequiredArgsConstructor;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuilder;
@@ -51,6 +52,7 @@ import org.apache.fineract.portfolio.group.exception.ClientNotInGroupException;
 import org.apache.fineract.portfolio.group.exception.GroupNotActiveException;
 import org.apache.fineract.portfolio.loanaccount.domain.Loan;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanRepositoryWrapper;
+import org.apache.fineract.portfolio.loanaccount.service.LoanOfficerService;
 import org.apache.fineract.portfolio.loanaccount.service.LoanWritePlatformService;
 import org.apache.fineract.portfolio.note.service.NoteWritePlatformService;
 import org.apache.fineract.portfolio.savings.domain.SavingsAccount;
@@ -62,11 +64,9 @@ import org.apache.fineract.portfolio.transfer.exception.ClientNotAwaitingTransfe
 import org.apache.fineract.portfolio.transfer.exception.ClientNotAwaitingTransferApprovalOrOnHoldException;
 import org.apache.fineract.portfolio.transfer.exception.TransferNotSupportedException;
 import org.apache.fineract.portfolio.transfer.exception.TransferNotSupportedException.TransferNotSupportedReason;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-@Service
+@RequiredArgsConstructor
 public class TransferWritePlatformServiceJpaRepositoryImpl implements TransferWritePlatformService {
 
     private final ClientRepositoryWrapper clientRepositoryWrapper;
@@ -82,31 +82,7 @@ public class TransferWritePlatformServiceJpaRepositoryImpl implements TransferWr
     private final StaffRepositoryWrapper staffRepositoryWrapper;
     private final ClientTransferDetailsRepositoryWrapper clientTransferDetailsRepositoryWrapper;
     private final PlatformSecurityContext context;
-
-    @Autowired
-    public TransferWritePlatformServiceJpaRepositoryImpl(final ClientRepositoryWrapper clientRepositoryWrapper,
-            final OfficeRepositoryWrapper officeRepository, final CalendarInstanceRepository calendarInstanceRepository,
-            final LoanWritePlatformService loanWritePlatformService, final GroupRepositoryWrapper groupRepository,
-            final LoanRepositoryWrapper loanRepositoryWrapper, final TransfersDataValidator transfersDataValidator,
-            final NoteWritePlatformService noteWritePlatformService, final StaffRepositoryWrapper staffRepositoryWrapper,
-            final SavingsAccountRepositoryWrapper savingsAccountRepositoryWrapper,
-            final SavingsAccountWritePlatformService savingsAccountWritePlatformService,
-            final ClientTransferDetailsRepositoryWrapper clientTransferDetailsRepositoryWrapper, final PlatformSecurityContext context) {
-        this.clientRepositoryWrapper = clientRepositoryWrapper;
-        this.officeRepository = officeRepository;
-        this.calendarInstanceRepository = calendarInstanceRepository;
-        this.loanWritePlatformService = loanWritePlatformService;
-        this.groupRepository = groupRepository;
-        this.loanRepositoryWrapper = loanRepositoryWrapper;
-        this.transfersDataValidator = transfersDataValidator;
-        this.noteWritePlatformService = noteWritePlatformService;
-        this.staffRepositoryWrapper = staffRepositoryWrapper;
-        this.savingsAccountRepositoryWrapper = savingsAccountRepositoryWrapper;
-        this.savingsAccountWritePlatformService = savingsAccountWritePlatformService;
-        this.clientTransferDetailsRepositoryWrapper = clientTransferDetailsRepositoryWrapper;
-        this.context = context;
-
-    }
+    private final LoanOfficerService loanOfficerService;
 
     @Override
     @Transactional
@@ -238,13 +214,13 @@ public class TransferWritePlatformServiceJpaRepositoryImpl implements TransferWr
          **/
         final List<Loan> allClientJLGLoans = this.loanRepositoryWrapper.findByClientIdAndGroupId(client.getId(), sourceGroup.getId());
         for (final Loan loan : allClientJLGLoans) {
-            if (loan.status().isActiveOrAwaitingApprovalOrDisbursal()) {
+            if (loan.getStatus().isActiveOrAwaitingApprovalOrDisbursal()) {
                 loan.updateGroup(destinationGroup);
                 if (inheritDestinationGroupLoanOfficer != null && inheritDestinationGroupLoanOfficer == true
                         && destinationGroupLoanOfficer != null) {
-                    loan.reassignLoanOfficer(destinationGroupLoanOfficer, DateUtils.getBusinessLocalDate());
+                    loanOfficerService.reassignLoanOfficer(loan, destinationGroupLoanOfficer, DateUtils.getBusinessLocalDate());
                 } else if (newLoanOfficer != null) {
-                    loan.reassignLoanOfficer(newLoanOfficer, DateUtils.getBusinessLocalDate());
+                    loanOfficerService.reassignLoanOfficer(loan, newLoanOfficer, DateUtils.getBusinessLocalDate());
                 }
                 this.loanRepositoryWrapper.saveAndFlush(loan);
             }

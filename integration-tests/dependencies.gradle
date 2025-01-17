@@ -20,12 +20,20 @@ dependencies {
     // testCompile dependencies are ONLY used in src/test, not src/main.
     // Do NOT repeat dependencies which are ALREADY in implementation or runtimeOnly!
     //
-    tomcat 'org.apache.tomcat:tomcat:9.0.65@zip'
+    tomcat 'org.apache.tomcat:tomcat:10.1.33@zip'
     testImplementation( files("$rootDir/fineract-provider/build/classes/java/main/"),
+            project(path: ':fineract-core', configuration: 'runtimeElements'),
+            project(path: ':fineract-accounting', configuration: 'runtimeElements'),
+            project(path: ':fineract-investor', configuration: 'runtimeElements'),
+            project(path: ':fineract-charge', configuration: 'runtimeElements'),
+            project(path: ':fineract-rates', configuration: 'runtimeElements'),
+            project(path: ':fineract-tax', configuration: 'runtimeElements'),
+            project(path: ':fineract-loan', configuration: 'runtimeElements'),
+            project(path: ':fineract-savings', configuration: 'runtimeElements'),
             project(path: ':fineract-provider', configuration: 'runtimeElements'),
             project(path: ':fineract-avro-schemas', configuration: 'runtimeElements'),
             project(path: ':fineract-client', configuration: 'runtimeElements'),
-            'io.cucumber:cucumber-spring',
+            project(path: ':fineract-progressive-loan', configuration: 'runtimeElements'),
             'com.intuit.karate:karate-junit5',
             // 'com.google.code.gson:gson',
             )
@@ -39,8 +47,16 @@ dependencies {
         exclude group: 'org.apache.sling'
         exclude group: 'com.sun.xml.bind'
     }
+    testImplementation 'org.apache.groovy:groovy-xml'
+    testImplementation 'org.apache.groovy:groovy-json'
     testImplementation 'org.awaitility:awaitility'
 
     testCompileOnly 'org.projectlombok:lombok'
     testAnnotationProcessor 'org.projectlombok:lombok'
+    testImplementation 'org.assertj:assertj-core'
+
+    testImplementation 'org.mapstruct:mapstruct'
+    testAnnotationProcessor 'org.mapstruct:mapstruct-processor'
+
+    testImplementation 'com.github.tomakehurst:wiremock-standalone'
 }

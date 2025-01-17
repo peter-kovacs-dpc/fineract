@@ -25,7 +25,6 @@ import com.google.gson.Gson;
 import io.restassured.path.json.JsonPath;
 import io.restassured.specification.RequestSpecification;
 import io.restassured.specification.ResponseSpecification;
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
@@ -108,11 +107,11 @@ public class CampaignsHelper {
         map.put("triggerType", triggerType);
         if (2 == triggerType) {
             map.put("recurrenceStartDate",
-                    LocalDateTime.now(Utils.getZoneIdOfTenant()).format(DateTimeFormatter.ofPattern(DATE_TIME_FORMAT)));
+                    Utils.getLocalDateTimeOfTenant().plusMinutes(1).format(DateTimeFormatter.ofPattern(DATE_TIME_FORMAT)));
             map.put("frequency", 1);
             map.put("interval", "1");
         }
-        map.put("campaignName", Utils.randomNameGenerator("Campaign_Name_", 5));
+        map.put("campaignName", Utils.randomStringGenerator("Campaign_Name_", 5));
         map.put("campaignType", 1);
         map.put("message", "Hi, this is from integtration tests runner");
         map.put("locale", "en");
@@ -136,9 +135,9 @@ public class CampaignsHelper {
         map.put("triggerType", triggerType);
         if (2 == triggerType) {
             map.put("recurrenceStartDate",
-                    LocalDateTime.now(Utils.getZoneIdOfTenant()).format(DateTimeFormatter.ofPattern(DATE_TIME_FORMAT)));
+                    Utils.getLocalDateTimeOfTenant().plusMinutes(1).format(DateTimeFormatter.ofPattern(DATE_TIME_FORMAT)));
         }
-        map.put("campaignName", Utils.randomNameGenerator("Campaign_Name_", 5));
+        map.put("campaignName", Utils.randomStringGenerator("Campaign_Name_", 5));
         map.put("campaignType", 1);
         map.put("message", "Hi, this is from integtration tests runner");
         map.put("locale", "en");

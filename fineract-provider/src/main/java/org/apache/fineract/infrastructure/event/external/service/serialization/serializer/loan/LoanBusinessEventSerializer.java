@@ -18,18 +18,30 @@
  */
 package org.apache.fineract.infrastructure.event.external.service.serialization.serializer.loan;
 
-import java.io.IOException;
-import java.nio.ByteBuffer;
+import java.util.Collection;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.apache.avro.generic.GenericContainer;
+import org.apache.commons.collections4.CollectionUtils;
+import org.apache.fineract.avro.generator.ByteBufferSerializable;
 import org.apache.fineract.avro.loan.v1.LoanAccountDataV1;
+import org.apache.fineract.avro.loan.v1.LoanInstallmentDelinquencyBucketDataV1;
 import org.apache.fineract.infrastructure.event.business.domain.BusinessEvent;
 import org.apache.fineract.infrastructure.event.business.domain.loan.LoanBusinessEvent;
 import org.apache.fineract.infrastructure.event.external.service.serialization.mapper.loan.LoanAccountDataMapper;
 import org.apache.fineract.infrastructure.event.external.service.serialization.serializer.BusinessEventSerializer;
-import org.apache.fineract.infrastructure.event.external.service.support.ByteBufferConverter;
+import org.apache.fineract.portfolio.delinquency.service.DelinquencyReadPlatformService;
+import org.apache.fineract.portfolio.loanaccount.api.LoanApiConstants;
+import org.apache.fineract.portfolio.loanaccount.data.CollectionData;
 import org.apache.fineract.portfolio.loanaccount.data.LoanAccountData;
+import org.apache.fineract.portfolio.loanaccount.data.LoanChargeData;
+import org.apache.fineract.portfolio.loanaccount.domain.LoanSummaryBalancesRepository;
+import org.apache.fineract.portfolio.loanaccount.domain.LoanTermVariations;
+import org.apache.fineract.portfolio.loanaccount.service.LoanChargeReadPlatformService;
 import org.apache.fineract.portfolio.loanaccount.service.LoanReadPlatformService;
+import org.apache.fineract.portfolio.loanaccount.service.LoanSummaryDataProvider;
+import org.apache.fineract.portfolio.loanaccount.service.LoanSummaryProviderDelegate;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -38,7 +50,12 @@ public class LoanBusinessEventSerializer implements BusinessEventSerializer {
 
     private final LoanReadPlatformService service;
     private final LoanAccountDataMapper mapper;
-    private final ByteBufferConverter byteBufferConverter;
+    private final LoanChargeReadPlatformService loanChargeReadPlatformService;
+    private final DelinquencyReadPlatformService delinquencyReadPlatformService;
+    private final LoanInstallmentLevelDelinquencyEventProducer installmentLevelDelinquencyEventProducer;
+    private final LoanSummaryBalancesRepository loanSummaryBalancesRepository;
+    @Lazy
+    private final LoanSummaryProviderDelegate loanSummaryProviderDelegate;
 
     @Override
     public <T> boolean canSerialize(BusinessEvent<T> event) {
@@ -46,12 +63,44 @@ public class LoanBusinessEventSerializer implements BusinessEventSerializer {
     }
 
     @Override
-    public <T> byte[] serialize(BusinessEvent<T> rawEvent) throws IOException {
+    public <T> ByteBufferSerializable toAvroDTO(BusinessEvent<T> rawEvent) {
         LoanBusinessEvent event = (LoanBusinessEvent) rawEvent;
-        LoanAccountData data = service.retrieveOne(event.get().getId());
-        LoanAccountDataV1 avroDto = mapper.map(data);
-        ByteBuffer buffer = avroDto.toByteBuffer();
-        return byteBufferConverter.convert(buffer);
+        Long loanId = event.get().getId();
+        LoanAccountData data = service.retrieveOne(loanId);
+
+        data = service.fetchRepaymentScheduleData(data);
+
+        Collection<LoanChargeData> loanCharges = loanChargeReadPlatformService.retrieveLoanCharges(loanId);
+        if (CollectionUtils.isNotEmpty(loanCharges)) {
+            data.setCharges(loanCharges);
+        }
+
+        CollectionData delinquentData = delinquencyReadPlatformService.calculateLoanCollectionData(loanId);
+        data.setDelinquent(delinquentData);
+
+        LoanSummaryDataProvider loanSummaryDataProvider = loanSummaryProviderDelegate
+                .resolveLoanSummaryDataProvider(data.getTransactionProcessingStrategyCode());
+
+        if (data.getSummary() != null) {
+            data.setSummary(loanSummaryDataProvider.withTransactionAmountsSummary(event.get(), data.getSummary(),
+                    data.getRepaymentSchedule(), loanSummaryBalancesRepository.retrieveLoanSummaryBalancesByTransactionType(loanId,
+                            LoanApiConstants.LOAN_SUMMARY_TRANSACTION_TYPES)));
+        } else {
+            data.setSummary(loanSummaryDataProvider.withOnlyCurrencyData(data.getCurrency()));
+        }
+
+        List<LoanInstallmentDelinquencyBucketDataV1> installmentsDelinquencyData = installmentLevelDelinquencyEventProducer
+                .calculateInstallmentLevelDelinquencyData(event.get(), data.getCurrency());
+
+        List<LoanTermVariations> activeLoanTermVariations = event.get().getActiveLoanTermVariations();
+
+        if (!activeLoanTermVariations.isEmpty()) {
+            data.setLoanTermVariations(activeLoanTermVariations.stream().map(LoanTermVariations::toData).toList());
+        }
+
+        LoanAccountDataV1 result = mapper.map(data);
+        result.getDelinquent().setInstallmentDelinquencyBuckets(installmentsDelinquencyData);
+        return result;
     }
 
     @Override

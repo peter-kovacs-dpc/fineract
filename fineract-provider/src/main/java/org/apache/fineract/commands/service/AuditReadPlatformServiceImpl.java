@@ -69,9 +69,7 @@ import org.apache.fineract.useradministration.domain.AppUser;
 import org.apache.fineract.useradministration.service.AppUserReadPlatformService;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.stereotype.Service;
 
-@Service
 @RequiredArgsConstructor
 @Slf4j
 public class AuditReadPlatformServiceImpl implements AuditReadPlatformService {
@@ -115,7 +113,7 @@ public class AuditReadPlatformServiceImpl implements AuditReadPlatformService {
                     + " left join m_office o on o.id = aud.office_id" + " left join m_group g on g.id = aud.group_id"
                     + " left join m_group_level gl on gl.id = g.level_id" + " left join m_client c on c.id = aud.client_id"
                     + " left join m_loan l on l.id = aud.loan_id" + " left join m_savings_account s on s.id = aud.savings_account_id"
-                    + " left join r_enum_value ev on ev.enum_name = 'processing_result_enum' and ev.enum_id = aud.processing_result_enum";
+                    + " left join r_enum_value ev on ev.enum_name = 'status' and ev.enum_id = aud.status";
 
             // data scoping: head office (hierarchy = ".") can see all audit
             // entries
@@ -170,7 +168,7 @@ public class AuditReadPlatformServiceImpl implements AuditReadPlatformService {
 
     @Override
     public Collection<AuditData> retrieveAuditEntries(final SQLBuilder extraCriteria, final boolean includeJson) {
-        return retrieveEntries("audit", extraCriteria, " order by aud.id DESC limit " + PaginationParameters.getCheckedLimit(null),
+        return retrieveEntries("audit", extraCriteria, " order by aud.id DESC limit " + PaginationParameters.DEFAULT_MAX_LIMIT,
                 includeJson);
     }
 
@@ -187,14 +185,14 @@ public class AuditReadPlatformServiceImpl implements AuditReadPlatformService {
         sqlBuilder.append("select " + sqlGenerator.calcFoundRows() + " ");
         sqlBuilder.append(rm.schema(includeJson, hierarchy));
         sqlBuilder.append(' ').append(extraCriteria.getSQLTemplate());
-        if (parameters.isOrderByRequested()) {
+        if (parameters.hasOrderBy()) {
             sqlBuilder.append(' ').append(parameters.orderBySql());
             this.columnValidator.validateSqlInjection(sqlBuilder.toString(), parameters.orderBySql());
         } else {
             sqlBuilder.append(' ').append(' ').append(" order by aud.id DESC");
         }
 
-        if (parameters.isLimited()) {
+        if (parameters.hasLimit()) {
             sqlBuilder.append(' ').append(parameters.limitSql());
             this.columnValidator.validateSqlInjection(sqlBuilder.toString(), parameters.limitSql());
         }
@@ -206,7 +204,7 @@ public class AuditReadPlatformServiceImpl implements AuditReadPlatformService {
 
     @Override
     public Collection<AuditData> retrieveAllEntriesToBeChecked(final SQLBuilder extraCriteria, final boolean includeJson) {
-        extraCriteria.addCriteria("aud.processing_result_enum = ", 2);
+        extraCriteria.addCriteria("aud.status = ", 2);
         return retrieveEntries("makerchecker", extraCriteria, " order by aud.id, mk.username", includeJson);
     }
 
@@ -491,13 +489,13 @@ public class AuditReadPlatformServiceImpl implements AuditReadPlatformService {
         @Override
         public ProcessingResultLookup mapRow(final ResultSet rs, @SuppressWarnings("unused") final int rowNum) throws SQLException {
             final Long id = JdbcSupport.getLong(rs, "id");
-            final String processingResult = rs.getString("processingResult");
+            final String status = rs.getString("status");
 
-            return new ProcessingResultLookup(id, processingResult);
+            return new ProcessingResultLookup(id, status);
         }
 
         public String schema() {
-            return " select enum_id as id, enum_message_property as processingResult from r_enum_value where enum_name = 'processing_result_enum' "
+            return " select enum_id as id, enum_message_property as status from r_enum_value where enum_name = 'status' "
                     + " order by enum_id";
         }
     }

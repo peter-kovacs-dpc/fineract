@@ -31,8 +31,8 @@ import org.apache.fineract.infrastructure.core.exception.AbstractPlatformDomainR
 import org.apache.fineract.infrastructure.core.exception.PlatformApiDataValidationException;
 import org.apache.fineract.infrastructure.jobs.exception.JobExecutionException;
 import org.apache.fineract.portfolio.loanaccount.loanschedule.data.OverdueLoanScheduleData;
+import org.apache.fineract.portfolio.loanaccount.service.LoanChargeWritePlatformService;
 import org.apache.fineract.portfolio.loanaccount.service.LoanReadPlatformService;
-import org.apache.fineract.portfolio.loanaccount.service.LoanWritePlatformService;
 import org.springframework.batch.core.StepContribution;
 import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.core.step.tasklet.Tasklet;
@@ -44,7 +44,7 @@ public class ApplyChargeToOverdueLoanInstallmentTasklet implements Tasklet {
 
     private final ConfigurationDomainService configurationDomainService;
     private final LoanReadPlatformService loanReadPlatformService;
-    private final LoanWritePlatformService loanWritePlatformService;
+    private final LoanChargeWritePlatformService loanChargeWritePlatformService;
 
     @Override
     public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) throws Exception {
@@ -66,23 +66,25 @@ public class ApplyChargeToOverdueLoanInstallmentTasklet implements Tasklet {
             }
 
             List<Throwable> exceptions = new ArrayList<>();
-            for (final Long loanId : overdueScheduleData.keySet()) {
+            for (Map.Entry<Long, Collection<OverdueLoanScheduleData>> entry : overdueScheduleData.entrySet()) {
                 try {
-                    loanWritePlatformService.applyOverdueChargesForLoan(loanId, overdueScheduleData.get(loanId));
+                    if (!entry.getValue().isEmpty()) {
+                        loanChargeWritePlatformService.applyOverdueChargesForLoan(entry.getKey(), entry.getValue());
+                    }
 
                 } catch (final PlatformApiDataValidationException e) {
                     final List<ApiParameterError> errors = e.getErrors();
                     for (final ApiParameterError error : errors) {
-                        log.error("Apply Charges due for overdue loans failed for account {} with message: {}", loanId,
+                        log.error("Apply Charges due for overdue loans failed for account {} with message: {}", entry.getKey(),
                                 error.getDeveloperMessage(), e);
                     }
                     exceptions.add(e);
                 } catch (final AbstractPlatformDomainRuleException e) {
-                    log.error("Apply Charges due for overdue loans failed for account {} with message: {}", loanId,
+                    log.error("Apply Charges due for overdue loans failed for account {} with message: {}", entry.getKey(),
                             e.getDefaultUserMessage(), e);
                     exceptions.add(e);
                 } catch (Exception e) {
-                    log.error("Apply Charges due for overdue loans failed for account {}", loanId, e);
+                    log.error("Apply Charges due for overdue loans failed for account {}", entry.getKey(), e);
                     exceptions.add(e);
                 }
             }

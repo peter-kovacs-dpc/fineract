@@ -19,16 +19,16 @@
 
 package org.apache.fineract.portfolio.self.pockets.domain;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.Table;
-import javax.persistence.UniqueConstraint;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import org.apache.fineract.infrastructure.core.domain.AbstractPersistableCustom;
 
 @SuppressWarnings("serial")
 @Entity
 @Table(name = "m_pocket", uniqueConstraints = { @UniqueConstraint(columnNames = { "app_user_id" }, name = "unique_app_user") })
-public class Pocket extends AbstractPersistableCustom {
+public class Pocket extends AbstractPersistableCustom<Long> {
 
     @Column(name = "app_user_id", length = 20, nullable = false)
     private Long appUserId;

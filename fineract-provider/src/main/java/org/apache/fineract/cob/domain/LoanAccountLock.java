@@ -18,14 +18,15 @@
  */
 package org.apache.fineract.cob.domain;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.Version;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.EnumType;
-import javax.persistence.Enumerated;
-import javax.persistence.Id;
-import javax.persistence.Table;
-import javax.persistence.Version;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
@@ -57,10 +58,14 @@ public class LoanAccountLock {
     @Column(name = "stacktrace")
     private String stacktrace;
 
-    public LoanAccountLock(Long loanId, LockOwner lockOwner) {
+    @Column(name = "lock_placed_on_cob_business_date")
+    private LocalDate lockPlacedOnCobBusinessDate;
+
+    public LoanAccountLock(Long loanId, LockOwner lockOwner, LocalDate lockPlacedOnCobBusinessDate) {
         this.loanId = loanId;
         this.lockOwner = lockOwner;
-        this.lockPlacedOn = DateUtils.getOffsetDateTimeOfTenant();
+        this.lockPlacedOn = DateUtils.getAuditOffsetDateTime();
+        this.lockPlacedOnCobBusinessDate = lockPlacedOnCobBusinessDate;
     }
 
     public void setError(String errorMessage, String stacktrace) {
@@ -70,6 +75,6 @@ public class LoanAccountLock {
 
     public void setNewLockOwner(LockOwner newLockOwner) {
         this.lockOwner = newLockOwner;
-        this.lockPlacedOn = DateUtils.getOffsetDateTimeOfTenant();
+        this.lockPlacedOn = DateUtils.getAuditOffsetDateTime();
     }
 }

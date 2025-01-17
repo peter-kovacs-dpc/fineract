@@ -18,6 +18,8 @@
  */
 package org.apache.fineract.infrastructure.campaigns.jobs.executereportmailingjobs;
 
+import jakarta.ws.rs.core.MultivaluedMap;
+import jakarta.ws.rs.core.Response;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -29,15 +31,13 @@ import java.time.format.DateTimeFormatter;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.Response;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.fineract.infrastructure.core.config.FineractProperties;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.infrastructure.dataqueries.domain.Report;
 import org.apache.fineract.infrastructure.dataqueries.service.ReadReportingService;
-import org.apache.fineract.infrastructure.documentmanagement.contentrepository.FileSystemContentRepository;
 import org.apache.fineract.infrastructure.report.provider.ReportingProcessServiceProvider;
 import org.apache.fineract.infrastructure.report.service.ReportingProcessService;
 import org.apache.fineract.infrastructure.reportmailingjob.data.ReportMailingJobEmailAttachmentFileFormat;
@@ -68,6 +68,7 @@ public class ExecuteReportMailingJobsTasklet implements Tasklet {
     private final ReportingProcessServiceProvider reportingProcessServiceProvider;
     private final ReportMailingJobEmailService reportMailingJobEmailService;
     private final ReportMailingJobRunHistoryRepository reportMailingJobRunHistoryRepository;
+    private final FineractProperties fineractProperties;
 
     private static final String DATETIME_FORMAT = "yyyy-MM-dd HH:mm:ss";
 
@@ -79,7 +80,7 @@ public class ExecuteReportMailingJobsTasklet implements Tasklet {
             final LocalDateTime localDateTimeOftenant = DateUtils.getLocalDateTimeOfTenant();
             final LocalDateTime nextRunDateTime = reportMailingJob.getNextRunDateTime();
 
-            if (nextRunDateTime != null && nextRunDateTime.isBefore(localDateTimeOftenant)) {
+            if (nextRunDateTime != null && DateUtils.isBefore(nextRunDateTime, localDateTimeOftenant)) {
                 final ReportMailingJobEmailAttachmentFileFormat emailAttachmentFileFormat = ReportMailingJobEmailAttachmentFileFormat
                         .newInstance(reportMailingJob.getEmailAttachmentFileFormat());
 
@@ -133,7 +134,7 @@ public class ExecuteReportMailingJobsTasklet implements Tasklet {
 
                 if (responseObject != null && responseObject.getClass().equals(ByteArrayOutputStream.class)) {
                     final ByteArrayOutputStream byteArrayOutputStream = (ByteArrayOutputStream) responseObject;
-                    final String fileLocation = FileSystemContentRepository.FINERACT_BASE_DIR + File.separator + "";
+                    final String fileLocation = fineractProperties.getContent().getFilesystem().getRootFolder() + File.separator + "";
                     final String fileNameWithoutExtension = fileLocation + File.separator + reportName;
 
                     if (!new File(fileLocation).isDirectory()) {
@@ -165,25 +166,25 @@ public class ExecuteReportMailingJobsTasklet implements Tasklet {
         final LocalDateTime nextRunDateTime = reportMailingJob.getNextRunDateTime();
         ReportMailingJobPreviousRunStatus reportMailingJobPreviousRunStatus = ReportMailingJobPreviousRunStatus.SUCCESS;
 
-        reportMailingJob.updatePreviousRunErrorLog(null);
+        reportMailingJob.setPreviousRunErrorLog(null);
 
         if (errorLog != null && errorLog.length() > 0) {
             reportMailingJobPreviousRunStatus = ReportMailingJobPreviousRunStatus.ERROR;
-            reportMailingJob.updatePreviousRunErrorLog(errorLog.toString());
+            reportMailingJob.setPreviousRunErrorLog(errorLog.toString());
         }
 
         reportMailingJob.increaseNumberOfRunsByOne();
-        reportMailingJob.updatePreviousRunStatus(reportMailingJobPreviousRunStatus.getValue());
-        reportMailingJob.updatePreviousRunDateTime(reportMailingJob.getNextRunDateTime());
+        reportMailingJob.setPreviousRunStatus(reportMailingJobPreviousRunStatus.getValue());
+        reportMailingJob.setPreviousRunDateTime(reportMailingJob.getNextRunDateTime());
 
         if (StringUtils.isEmpty(recurrence)) {
-            reportMailingJob.deactivate();
+            reportMailingJob.setActive(false);
 
-            reportMailingJob.updateNextRunDateTime(null);
+            reportMailingJob.setNextRunDateTime(null);
         } else if (nextRunDateTime != null) {
             final LocalDateTime nextRecurringDateTime = createNextRecurringDateTime(recurrence, nextRunDateTime);
 
-            reportMailingJob.updateNextRunDateTime(nextRecurringDateTime);
+            reportMailingJob.setNextRunDateTime(nextRecurringDateTime);
         }
 
         reportMailingJobRepository.save(reportMailingJob);
@@ -202,8 +203,8 @@ public class ExecuteReportMailingJobsTasklet implements Tasklet {
             byteArrayOutputStream.writeTo(outputStream);
 
             for (String emailRecipient : emailRecipients) {
-                final ReportMailingJobEmailData reportMailingJobEmailData = new ReportMailingJobEmailData(emailRecipient,
-                        reportMailingJob.getEmailMessage(), reportMailingJob.getEmailSubject(), file);
+                final ReportMailingJobEmailData reportMailingJobEmailData = new ReportMailingJobEmailData().setTo(emailRecipient)
+                        .setText(reportMailingJob.getEmailMessage()).setSubject(reportMailingJob.getEmailSubject()).setAttachment(file);
 
                 reportMailingJobEmailService.sendEmailWithAttachment(reportMailingJobEmailData);
             }

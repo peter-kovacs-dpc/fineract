@@ -18,16 +18,17 @@
  */
 package org.apache.fineract.infrastructure.security.filter;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import javax.servlet.FilterChain;
-import javax.servlet.ServletException;
-import javax.servlet.ServletRequest;
-import javax.servlet.ServletResponse;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.time.StopWatch;
@@ -42,9 +43,7 @@ import org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil;
 import org.apache.fineract.infrastructure.security.data.PlatformRequestLog;
 import org.apache.fineract.infrastructure.security.exception.InvalidTenantIdentifierException;
 import org.apache.fineract.infrastructure.security.service.BasicAuthTenantDetailsService;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.stereotype.Service;
 import org.springframework.web.filter.GenericFilterBean;
 
 /**
@@ -58,13 +57,11 @@ import org.springframework.web.filter.GenericFilterBean;
  *
  * Used to support Oauth2 authentication and the service is loaded only when "oauth" profile is active.
  */
-@Service
-@ConditionalOnProperty("fineract.security.oauth.enabled")
 @RequiredArgsConstructor
 @Slf4j
 public class TenantAwareTenantIdentifierFilter extends GenericFilterBean {
 
-    private static AtomicBoolean firstRequestProcessed = new AtomicBoolean();
+    private static final AtomicBoolean FIRST_PROCESSED_REQUEST = new AtomicBoolean();
 
     private final BasicAuthTenantDetailsService basicAuthTenantDetailsService;
     private final ToApiJsonSerializer<PlatformRequestLog> toApiJsonSerializer;
@@ -73,11 +70,12 @@ public class TenantAwareTenantIdentifierFilter extends GenericFilterBean {
 
     private final BusinessDateReadPlatformService businessDateReadPlatformService;
 
-    private final String tenantRequestHeader = "Fineract-Platform-TenantId";
-    private final boolean exceptionIfHeaderMissing = true;
-    private final String apiUri = "/api/v1/";
+    private static final String TENANT_ID_REQUEST_HEADER = "Fineract-Platform-TenantId";
+    private static final boolean EXCEPTION_IF_HEADER_MISSING = true;
+    private static final String API_URI = "/api/v1/";
 
     @Override
+    @SuppressFBWarnings("SLF4J_SIGN_ONLY_FORMAT")
     public void doFilter(final ServletRequest req, final ServletResponse res, final FilterChain chain)
             throws IOException, ServletException {
 
@@ -88,7 +86,7 @@ public class TenantAwareTenantIdentifierFilter extends GenericFilterBean {
         task.start();
 
         try {
-
+            ThreadLocalContextUtil.reset();
             // allows for Cross-Origin
             // Requests (CORs) to be performed against the platform API.
             response.setHeader("Access-Control-Allow-Origin", "*"); // NOSONAR
@@ -101,14 +99,14 @@ public class TenantAwareTenantIdentifierFilter extends GenericFilterBean {
 
             if (!"OPTIONS".equalsIgnoreCase(request.getMethod())) {
 
-                String tenantIdentifier = request.getHeader(this.tenantRequestHeader);
+                String tenantIdentifier = request.getHeader(TENANT_ID_REQUEST_HEADER);
                 if (org.apache.commons.lang3.StringUtils.isBlank(tenantIdentifier)) {
                     tenantIdentifier = request.getParameter("tenantIdentifier");
                 }
 
-                if (tenantIdentifier == null && this.exceptionIfHeaderMissing) {
+                if (tenantIdentifier == null && EXCEPTION_IF_HEADER_MISSING) {
                     throw new InvalidTenantIdentifierException("No tenant identifier found: Add request header of '"
-                            + this.tenantRequestHeader + "' or add the parameter 'tenantIdentifier' to query string of request URL.");
+                            + TENANT_ID_REQUEST_HEADER + "' or add the parameter 'tenantIdentifier' to query string of request URL.");
                 }
 
                 String pathInfo = request.getRequestURI();
@@ -116,9 +114,9 @@ public class TenantAwareTenantIdentifierFilter extends GenericFilterBean {
                 if (pathInfo != null && pathInfo.contains("report")) {
                     isReportRequest = true;
                 }
-                final FineractPlatformTenant tenant = this.basicAuthTenantDetailsService.loadTenantById(tenantIdentifier, isReportRequest);
+                final FineractPlatformTenant tenant = basicAuthTenantDetailsService.loadTenantById(tenantIdentifier, isReportRequest);
                 ThreadLocalContextUtil.setTenant(tenant);
-                HashMap<BusinessDateType, LocalDate> businessDates = this.businessDateReadPlatformService.getBusinessDates();
+                HashMap<BusinessDateType, LocalDate> businessDates = businessDateReadPlatformService.getBusinessDates();
                 ThreadLocalContextUtil.setBusinessDates(businessDates);
                 String authToken = request.getHeader("Authorization");
 
@@ -126,18 +124,18 @@ public class TenantAwareTenantIdentifierFilter extends GenericFilterBean {
                     ThreadLocalContextUtil.setAuthToken(authToken.replaceFirst("bearer ", ""));
                 }
 
-                if (!firstRequestProcessed.get()) {
+                if (!FIRST_PROCESSED_REQUEST.get()) {
                     final String baseUrl = request.getRequestURL().toString().replace(request.getRequestURI(),
-                            request.getContextPath() + apiUri);
+                            request.getContextPath() + API_URI);
                     System.setProperty("baseUrl", baseUrl);
 
-                    final boolean ehcacheEnabled = this.configurationDomainService.isEhcacheEnabled();
+                    final boolean ehcacheEnabled = configurationDomainService.isEhcacheEnabled();
                     if (ehcacheEnabled) {
-                        this.cacheWritePlatformService.switchToCache(CacheType.SINGLE_NODE);
+                        cacheWritePlatformService.switchToCache(CacheType.SINGLE_NODE);
                     } else {
-                        this.cacheWritePlatformService.switchToCache(CacheType.NO_CACHE);
+                        cacheWritePlatformService.switchToCache(CacheType.NO_CACHE);
                     }
-                    firstRequestProcessed.set(true);
+                    FIRST_PROCESSED_REQUEST.set(true);
                 }
                 chain.doFilter(request, response);
             }
@@ -148,9 +146,10 @@ public class TenantAwareTenantIdentifierFilter extends GenericFilterBean {
             response.addHeader("WWW-Authenticate", "Basic realm=\"" + "Fineract Platform API" + "\"");
             response.sendError(HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
         } finally {
+            ThreadLocalContextUtil.reset();
             task.stop();
             final PlatformRequestLog logRequest = PlatformRequestLog.from(task, request);
-            log.debug("{}", this.toApiJsonSerializer.serialize(logRequest));
+            log.debug("{}", toApiJsonSerializer.serialize(logRequest));
         }
 
     }

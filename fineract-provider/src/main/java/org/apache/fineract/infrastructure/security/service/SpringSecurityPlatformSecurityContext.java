@@ -63,7 +63,10 @@ public class SpringSecurityPlatformSecurityContext implements PlatformSecurityCo
         if (context != null) {
             final Authentication auth = context.getAuthentication();
             if (auth != null) {
-                currentUser = (AppUser) auth.getPrincipal();
+                Object principal = auth.getPrincipal();
+                if (principal instanceof AppUser appUser) {
+                    currentUser = appUser;
+                }
             }
         }
 
@@ -76,6 +79,11 @@ public class SpringSecurityPlatformSecurityContext implements PlatformSecurityCo
         }
 
         return currentUser;
+    }
+
+    @Override
+    public void isAuthenticated() {
+        authenticatedUser();
     }
 
     @Override
@@ -152,7 +160,7 @@ public class SpringSecurityPlatformSecurityContext implements PlatformSecurityCo
 
             final LocalDate passwordExpirationDate = passWordLastUpdateDate.plusDays(passwordDurationDays);
 
-            if (DateUtils.getLocalDateOfTenant().isAfter(passwordExpirationDate)) {
+            if (DateUtils.isBeforeTenantDate(passwordExpirationDate)) {
                 return true;
             }
         }

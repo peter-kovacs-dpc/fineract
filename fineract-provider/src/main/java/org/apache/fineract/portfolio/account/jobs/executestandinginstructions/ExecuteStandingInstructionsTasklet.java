@@ -25,6 +25,7 @@ import java.util.Collection;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.fineract.infrastructure.core.domain.ExternalId;
 import org.apache.fineract.infrastructure.core.exception.AbstractPlatformServiceUnavailableException;
 import org.apache.fineract.infrastructure.core.exception.PlatformApiDataValidationException;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
@@ -74,12 +75,12 @@ public class ExecuteStandingInstructionsTasklet implements Tasklet {
                 LocalDate startDate = data.validFrom();
                 if (frequencyType.isMonthly()) {
                     startDate = startDate.withDayOfMonth(data.recurrenceOnDay());
-                    if (startDate.isBefore(data.validFrom())) {
+                    if (DateUtils.isBefore(startDate, data.validFrom())) {
                         startDate = startDate.plusMonths(1);
                     }
                 } else if (frequencyType.isYearly()) {
                     startDate = startDate.withDayOfMonth(data.recurrenceOnDay()).withMonth(data.recurrenceOnMonth());
-                    if (startDate.isBefore(data.validFrom())) {
+                    if (DateUtils.isBefore(startDate, data.validFrom())) {
                         startDate = startDate.plusYears(1);
                     }
                 }
@@ -96,7 +97,7 @@ public class ExecuteStandingInstructionsTasklet implements Tasklet {
                     transactionAmount = standingInstructionDuesData.totalDueAmount();
                 }
                 if (recurrenceType.isDuesRecurrence()) {
-                    isDueForTransfer = LocalDate.now(DateUtils.getDateTimeZoneOfTenant()).equals(standingInstructionDuesData.dueDate());
+                    isDueForTransfer = isDueForTransfer(standingInstructionDuesData);
                 }
             }
 
@@ -107,8 +108,8 @@ public class ExecuteStandingInstructionsTasklet implements Tasklet {
                 AccountTransferDTO accountTransferDTO = new AccountTransferDTO(transactionDate, transactionAmount, data.fromAccountType(),
                         data.toAccountType(), data.fromAccount().getId(), data.toAccount().getId(),
                         data.name() + " Standing instruction trasfer ", null, null, null, null, data.toTransferType(), null, null,
-                        data.transferType().getValue(), null, null, null, null, null, fromSavingsAccount, isRegularTransaction,
-                        isExceptionForBalanceCheck);
+                        data.transferType().getValue(), null, null, ExternalId.empty(), null, null, fromSavingsAccount,
+                        isRegularTransaction, isExceptionForBalanceCheck);
                 final boolean transferCompleted = transferAmount(errors, accountTransferDTO, data.getId());
 
                 if (transferCompleted) {
@@ -162,5 +163,10 @@ public class ExecuteStandingInstructionsTasklet implements Tasklet {
         updateQuery.append("'").append(errorLog).append("')");
         jdbcTemplate.update(updateQuery.toString());
         return transferCompleted;
+    }
+
+    public boolean isDueForTransfer(StandingInstructionDuesData standingInstructionDuesData) {
+        return standingInstructionDuesData.dueDate() != null
+                && !standingInstructionDuesData.dueDate().isAfter(LocalDate.now(DateUtils.getDateTimeZoneOfTenant()));
     }
 }

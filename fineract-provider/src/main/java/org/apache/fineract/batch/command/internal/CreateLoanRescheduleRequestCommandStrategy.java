@@ -18,12 +18,13 @@
  */
 package org.apache.fineract.batch.command.internal;
 
-import javax.ws.rs.core.UriInfo;
+import jakarta.ws.rs.core.UriInfo;
 import lombok.RequiredArgsConstructor;
 import org.apache.fineract.batch.command.CommandStrategy;
 import org.apache.fineract.batch.domain.BatchRequest;
 import org.apache.fineract.batch.domain.BatchResponse;
 import org.apache.fineract.portfolio.loanaccount.rescheduleloan.api.RescheduleLoansApiResource;
+import org.apache.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 /**
@@ -55,7 +56,7 @@ public class CreateLoanRescheduleRequestCommandStrategy implements CommandStrate
         // 'RescheduleLoansApiResource' to create a reschedule request on an existing loan
         responseBody = rescheduleLoansApiResource.createLoanRescheduleRequest(request.getBody());
 
-        response.setStatusCode(200);
+        response.setStatusCode(HttpStatus.SC_OK);
         // Sets the body of the response after savings is successfully
         // applied
         response.setBody(responseBody);

@@ -18,9 +18,9 @@
  */
 package org.apache.fineract.cob.domain;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.Table;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -31,7 +31,7 @@ import org.apache.fineract.infrastructure.core.domain.AbstractPersistableCustom;
 @NoArgsConstructor
 @Getter
 @Setter
-public class BatchBusinessStep extends AbstractPersistableCustom {
+public class BatchBusinessStep extends AbstractPersistableCustom<Long> {
 
     @Column(name = "job_name", nullable = false)
     private String jobName;

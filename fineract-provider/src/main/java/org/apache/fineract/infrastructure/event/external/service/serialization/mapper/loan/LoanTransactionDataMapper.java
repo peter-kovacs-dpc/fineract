@@ -22,9 +22,13 @@ import org.apache.fineract.avro.loan.v1.LoanTransactionDataV1;
 import org.apache.fineract.infrastructure.event.external.service.serialization.mapper.support.AvroMapperConfig;
 import org.apache.fineract.portfolio.loanaccount.data.LoanTransactionData;
 import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
 
 @Mapper(config = AvroMapperConfig.class)
 public interface LoanTransactionDataMapper {
 
+    // unpaidCharges are calculated and set explicitly based on if needed (only for charge-off transaction yet)
+    @Mapping(target = "unpaidCharges", ignore = true)
+    @Mapping(target = "externalOwnerId", ignore = true)
     LoanTransactionDataV1 map(LoanTransactionData source);
 }

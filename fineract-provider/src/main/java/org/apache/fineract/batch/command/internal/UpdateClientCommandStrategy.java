@@ -18,12 +18,15 @@
  */
 package org.apache.fineract.batch.command.internal;
 
-import javax.ws.rs.core.UriInfo;
+import static org.apache.fineract.batch.command.CommandStrategyUtils.relativeUrlWithoutVersion;
+
+import jakarta.ws.rs.core.UriInfo;
 import lombok.RequiredArgsConstructor;
 import org.apache.fineract.batch.command.CommandStrategy;
 import org.apache.fineract.batch.domain.BatchRequest;
 import org.apache.fineract.batch.domain.BatchResponse;
 import org.apache.fineract.portfolio.client.api.ClientsApiResource;
+import org.apache.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 /**
@@ -55,14 +58,14 @@ public class UpdateClientCommandStrategy implements CommandStrategy {
         response.setHeaders(request.getHeaders());
 
         // Get the clientID
-        final String relativeUrl = request.getRelativeUrl();
+        final String relativeUrl = relativeUrlWithoutVersion(request);
         final Long clientId = Long.parseLong(relativeUrl.substring(relativeUrl.indexOf('/') + 1));
 
         // Calls 'update' function from 'ClientsApiResource' to update a
         // client
         responseBody = clientsApiResource.update(clientId, request.getBody());
 
-        response.setStatusCode(200);
+        response.setStatusCode(HttpStatus.SC_OK);
         // Sets the body of the response after the successful update of
         // client information
         response.setBody(responseBody);

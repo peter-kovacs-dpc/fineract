@@ -22,11 +22,13 @@ import com.lowagie.text.Document;
 import com.lowagie.text.PageSize;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
-import java.io.ByteArrayInputStream;
+import jakarta.ws.rs.core.StreamingOutput;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.InputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -35,14 +37,16 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
-import javax.ws.rs.core.StreamingOutput;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVPrinter;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.fineract.infrastructure.core.config.FineractProperties;
 import org.apache.fineract.infrastructure.core.domain.JdbcSupport;
-import org.apache.fineract.infrastructure.core.exception.PlatformDataIntegrityException;
+import org.apache.fineract.infrastructure.core.exception.ErrorHandler;
 import org.apache.fineract.infrastructure.core.service.database.DatabaseSpecificSQLGenerator;
+import org.apache.fineract.infrastructure.core.service.database.JdbcJavaType;
 import org.apache.fineract.infrastructure.dataqueries.data.GenericResultsetData;
 import org.apache.fineract.infrastructure.dataqueries.data.ReportData;
 import org.apache.fineract.infrastructure.dataqueries.data.ReportParameterData;
@@ -50,7 +54,6 @@ import org.apache.fineract.infrastructure.dataqueries.data.ReportParameterJoinDa
 import org.apache.fineract.infrastructure.dataqueries.data.ResultsetColumnHeaderData;
 import org.apache.fineract.infrastructure.dataqueries.data.ResultsetRowData;
 import org.apache.fineract.infrastructure.dataqueries.exception.ReportNotFoundException;
-import org.apache.fineract.infrastructure.documentmanagement.contentrepository.FileSystemContentRepository;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
 import org.apache.fineract.infrastructure.security.service.SqlInjectionPreventerService;
 import org.apache.fineract.infrastructure.security.utils.LogParameterEscapeUtil;
@@ -72,81 +75,34 @@ public class ReadReportingServiceImpl implements ReadReportingService {
     private final GenericDataService genericDataService;
     private final SqlInjectionPreventerService sqlInjectionPreventerService;
     private final DatabaseSpecificSQLGenerator sqlGenerator;
+    private final FineractProperties fineractProperties;
 
     @Override
     public StreamingOutput retrieveReportCSV(final String name, final String type, final Map<String, String> queryParams,
             final boolean isSelfServiceUserReport) {
         return out -> {
             try {
-
                 final GenericResultsetData result = retrieveGenericResultset(name, type, queryParams, isSelfServiceUserReport);
-                final StringBuilder sb = generateCsvFileBuffer(result);
-
-                final InputStream in = new ByteArrayInputStream(sb.toString().getBytes(StandardCharsets.UTF_8));
-
-                final byte[] outputByte = new byte[4096];
-                Integer readLen = in.read(outputByte, 0, 4096);
-
-                while (readLen != -1) {
-                    out.write(outputByte, 0, readLen);
-                    readLen = in.read(outputByte, 0, 4096);
-                }
-                // in.close();
-                // out.flush();
-                // out.close();
+                generateCsvFileBuffer(result, out);
             } catch (final Exception e) {
-                throw new PlatformDataIntegrityException("error.msg.exception.error", e.getMessage(), e);
+                throw ErrorHandler.getMappable(e);
             }
         };
     }
 
-    private StringBuilder generateCsvFileBuffer(final GenericResultsetData result) {
-        final StringBuilder writer = new StringBuilder();
-
-        final List<ResultsetColumnHeaderData> columnHeaders = result.getColumnHeaders();
-        log.debug("NO. of Columns: {}", columnHeaders.size());
-        final Integer chSize = columnHeaders.size();
-        for (int i = 0; i < chSize; i++) {
-            writer.append('"' + columnHeaders.get(i).getColumnName() + '"');
-            if (i < (chSize - 1)) {
-                writer.append(",");
+    private void generateCsvFileBuffer(final GenericResultsetData result, OutputStream out) throws IOException {
+        try (CSVPrinter printer = new CSVPrinter(new OutputStreamWriter(out, StandardCharsets.UTF_8), CSVFormat.EXCEL)) {
+            final List<ResultsetColumnHeaderData> columnHeaders = result.getColumnHeaders();
+            final List<ResultsetRowData> data = result.getData();
+            final List<String> header = new ArrayList<>();
+            for (final ResultsetColumnHeaderData columnHeader : columnHeaders) {
+                header.add(columnHeader.getColumnName());
+            }
+            printer.printRecord(header);
+            for (final ResultsetRowData row : data) {
+                printer.printRecord(row.getRow());
             }
         }
-        writer.append('\n');
-
-        final List<ResultsetRowData> data = result.getData();
-        List<Object> row;
-        Integer rSize;
-        // String currCol;
-        String currColType;
-        String currVal;
-        final String doubleQuote = "\"";
-        final String twoDoubleQuotes = doubleQuote + doubleQuote;
-        log.debug("NO. of Rows: {}", data.size());
-        for (ResultsetRowData element : data) {
-            row = element.getRow();
-            rSize = row.size();
-            for (int j = 0; j < rSize; j++) {
-                // currCol = columnHeaders.get(j).getColumnName();
-                currColType = columnHeaders.get(j).getColumnType();
-                currVal = (String) row.get(j);
-                if (currVal != null) {
-                    if (currColType.equals("DECIMAL") || currColType.equals("DOUBLE") || currColType.equals("BIGINT")
-                            || currColType.equals("SMALLINT") || currColType.equals("INT")) {
-                        writer.append(currVal);
-                    } else {
-                        writer.append('"' + this.genericDataService.replace(currVal, doubleQuote, twoDoubleQuotes) + '"');
-                    }
-
-                }
-                if (j < (rSize - 1)) {
-                    writer.append(",");
-                }
-            }
-            writer.append('\n');
-        }
-
-        return writer;
     }
 
     @Override
@@ -176,11 +132,8 @@ public class ReadReportingServiceImpl implements ReadReportingService {
 
         String sql = getSql(name, type);
 
-        final Set<String> keys = queryParams.keySet();
-        for (final String key : keys) {
-            final String pValue = queryParams.get(key);
-            // LOG.info("({} : {})", key, pValue);
-            sql = this.genericDataService.replace(sql, key, pValue);
+        for (Map.Entry<String, String> entry : queryParams.entrySet()) {
+            sql = this.genericDataService.replace(sql, entry.getKey(), entry.getValue());
         }
 
         final AppUser currentUser = this.context.authenticatedUser();
@@ -240,7 +193,7 @@ public class ReadReportingServiceImpl implements ReadReportingService {
     public String retrieveReportPDF(final String reportName, final String type, final Map<String, String> queryParams,
             final boolean isSelfServiceUserReport) {
 
-        final String fileLocation = FileSystemContentRepository.FINERACT_BASE_DIR + File.separator + "";
+        final String fileLocation = fineractProperties.getContent().getFilesystem().getRootFolder() + File.separator + "";
         if (!new File(fileLocation).isDirectory()) {
             new File(fileLocation).mkdirs();
         }
@@ -274,23 +227,16 @@ public class ReadReportingServiceImpl implements ReadReportingService {
             table.completeRow();
 
             Integer rSize;
-            String currColType;
+            JdbcJavaType currColType;
             String currVal;
             log.debug("NO. of Rows: {}", data.size());
             for (ResultsetRowData element : data) {
                 row = element.getRow();
                 rSize = row.size();
                 for (int j = 0; j < rSize; j++) {
-                    currColType = columnHeaders.get(j).getColumnType();
                     currVal = (String) row.get(j);
                     if (currVal != null) {
-                        if (currColType.equals("DECIMAL") || currColType.equals("DOUBLE") || currColType.equals("BIGINT")
-                                || currColType.equals("SMALLINT") || currColType.equals("INT")) {
-
-                            table.addCell(currVal.toString());
-                        } else {
-                            table.addCell(currVal.toString());
-                        }
+                        table.addCell(currVal);
                     }
                 }
             }
@@ -300,7 +246,7 @@ public class ReadReportingServiceImpl implements ReadReportingService {
             return genaratePdf;
         } catch (final Exception e) {
             log.error("error.msg.reporting.error:", e);
-            throw new PlatformDataIntegrityException("error.msg.exception.error", e.getMessage(), e);
+            throw ErrorHandler.getMappable(e);
         }
     }
 
@@ -498,11 +444,8 @@ public class ReadReportingServiceImpl implements ReadReportingService {
     private String sqlToRunForSmsEmailCampaign(final String name, final String type, final Map<String, String> queryParams) {
         String sql = getSql(name, type);
 
-        final Set<String> keys = queryParams.keySet();
-        for (String key : keys) {
-            final String pValue = queryParams.get(key);
-            key = "${" + key + "}";
-            sql = this.genericDataService.replace(sql, key, pValue);
+        for (Map.Entry<String, String> entry : queryParams.entrySet()) {
+            sql = this.genericDataService.replace(sql, "${" + entry.getKey() + "}", entry.getValue());
         }
 
         sql = this.genericDataService.wrapSQL(sql);

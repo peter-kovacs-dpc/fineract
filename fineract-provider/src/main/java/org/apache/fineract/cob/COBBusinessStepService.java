@@ -18,15 +18,17 @@
  */
 package org.apache.fineract.cob;
 
+import java.util.Set;
 import java.util.TreeMap;
+import org.apache.fineract.cob.data.BusinessStepNameAndOrder;
 import org.apache.fineract.infrastructure.core.domain.AbstractPersistableCustom;
 import org.jetbrains.annotations.NotNull;
 
 public interface COBBusinessStepService {
 
-    <T extends COBBusinessStep<S>, S extends AbstractPersistableCustom> S run(TreeMap<Long, String> executionMap, S item);
+    <T extends COBBusinessStep<S>, S extends AbstractPersistableCustom<Long>> S run(TreeMap<Long, String> executionMap, S item);
 
     @NotNull
-    <T extends COBBusinessStep<S>, S extends AbstractPersistableCustom> TreeMap<Long, String> getCOBBusinessStepMap(
+    <T extends COBBusinessStep<S>, S extends AbstractPersistableCustom<Long>> Set<BusinessStepNameAndOrder> getCOBBusinessSteps(
             Class<T> businessStepClass, String cobJobName);
 }

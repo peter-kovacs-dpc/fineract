@@ -13,6 +13,22 @@
         },
         {
             "default": null,
+            "name": "loanId",
+            "type": [
+                "null",
+                "long"
+            ]
+        },
+        {
+            "default": null,
+            "name": "externalLoanId",
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        {
+            "default": null,
             "name": "officeId",
             "type": [
                 "null",
@@ -133,6 +149,14 @@
         },
         {
             "default": null,
+            "name": "externalOwnerId",
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        {
+            "default": null,
             "name": "transfer",
             "type": [
                 "null",
@@ -188,6 +212,37 @@
                     "type": "array",
                     "items": "org.apache.fineract.avro.loan.v1.LoanChargePaidByDataV1"
                 }
+            ]
+        },
+        {
+            "default": null,
+            "name": "transactionRelations",
+            "type": [
+                "null",
+                {
+                    "type": "array",
+                    "items": "org.apache.fineract.avro.loan.v1.LoanTransactionRelationDataV1"
+                }
+            ]
+        },
+        {
+            "default": null,
+            "name": "unpaidCharges",
+            "doc": "Only used for Charge-off transaction",
+            "type": [
+                "null",
+                {
+                    "type": "array",
+                    "items": "org.apache.fineract.avro.loan.v1.UnpaidChargeDataV1"
+                }
+            ]
+        },
+        {
+            "default": null,
+            "name": "reversedOnDate",
+            "type": [
+                "null",
+                "string"
             ]
         }
     ]

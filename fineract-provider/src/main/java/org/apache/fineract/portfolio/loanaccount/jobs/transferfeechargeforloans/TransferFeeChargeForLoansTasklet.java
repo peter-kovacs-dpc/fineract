@@ -23,6 +23,7 @@ import java.util.Collection;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.fineract.infrastructure.core.domain.ExternalId;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.infrastructure.jobs.exception.JobExecutionException;
 import org.apache.fineract.portfolio.account.PortfolioAccountType;
@@ -63,7 +64,7 @@ public class TransferFeeChargeForLoansTasklet implements Tasklet {
                             .retrieveInstallmentLoanCharges(chargeData.getId(), true);
                     PortfolioAccountData portfolioAccountData = null;
                     for (final LoanInstallmentChargeData installmentChargeData : chargePerInstallments) {
-                        if (!installmentChargeData.getDueDate().isAfter(DateUtils.getBusinessLocalDate())) {
+                        if (!DateUtils.isDateInTheFuture(installmentChargeData.getDueDate())) {
                             if (portfolioAccountData == null) {
                                 portfolioAccountData = accountAssociationsReadPlatformService
                                         .retriveLoanLinkedAssociation(chargeData.getLoanId());
@@ -74,11 +75,11 @@ public class TransferFeeChargeForLoansTasklet implements Tasklet {
                                     portfolioAccountData.getId(), chargeData.getLoanId(), "Loan Charge Payment", null, null, null, null,
                                     LoanTransactionType.CHARGE_PAYMENT.getValue(), chargeData.getId(),
                                     installmentChargeData.getInstallmentNumber(), AccountTransferType.CHARGE_PAYMENT.getValue(), null, null,
-                                    null, null, null, null, isRegularTransaction, isExceptionForBalanceCheck);
+                                    ExternalId.empty(), null, null, null, isRegularTransaction, isExceptionForBalanceCheck);
                             transferFeeCharge(accountTransferDTO, errors);
                         }
                     }
-                } else if (chargeData.getDueDate() != null && !chargeData.getDueDate().isAfter(DateUtils.getBusinessLocalDate())) {
+                } else if (chargeData.getDueDate() != null && !DateUtils.isDateInTheFuture(chargeData.getDueDate())) {
                     final PortfolioAccountData portfolioAccountData = accountAssociationsReadPlatformService
                             .retriveLoanLinkedAssociation(chargeData.getLoanId());
                     final boolean isExceptionForBalanceCheck = false;
@@ -86,8 +87,8 @@ public class TransferFeeChargeForLoansTasklet implements Tasklet {
                             chargeData.getAmountOutstanding(), PortfolioAccountType.SAVINGS, PortfolioAccountType.LOAN,
                             portfolioAccountData.getId(), chargeData.getLoanId(), "Loan Charge Payment", null, null, null, null,
                             LoanTransactionType.CHARGE_PAYMENT.getValue(), chargeData.getId(), null,
-                            AccountTransferType.CHARGE_PAYMENT.getValue(), null, null, null, null, null, null, isRegularTransaction,
-                            isExceptionForBalanceCheck);
+                            AccountTransferType.CHARGE_PAYMENT.getValue(), null, null, ExternalId.empty(), null, null, null,
+                            isRegularTransaction, isExceptionForBalanceCheck);
                     transferFeeCharge(accountTransferDTO, errors);
                 }
             }

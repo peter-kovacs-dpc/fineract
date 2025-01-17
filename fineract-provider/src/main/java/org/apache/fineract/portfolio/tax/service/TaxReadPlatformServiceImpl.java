@@ -24,6 +24,7 @@ import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
+import lombok.RequiredArgsConstructor;
 import org.apache.fineract.accounting.common.AccountingDropdownReadPlatformService;
 import org.apache.fineract.accounting.common.AccountingEnumerations;
 import org.apache.fineract.accounting.glaccount.data.GLAccountData;
@@ -33,39 +34,30 @@ import org.apache.fineract.portfolio.tax.data.TaxComponentData;
 import org.apache.fineract.portfolio.tax.data.TaxComponentHistoryData;
 import org.apache.fineract.portfolio.tax.data.TaxGroupData;
 import org.apache.fineract.portfolio.tax.data.TaxGroupMappingsData;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.stereotype.Service;
 
-@Service
+@RequiredArgsConstructor
 public class TaxReadPlatformServiceImpl implements TaxReadPlatformService {
 
-    final TaxComponentMapper taxComponentMapper = new TaxComponentMapper();
-    final TaxGroupMapper taxGroupMapper = new TaxGroupMapper();
-    final TaxComponentLookUpMapper taxComponentLookUpMapper = new TaxComponentLookUpMapper();
-    final TaxGroupLookUpMapper taxGroupLookUpMapper = new TaxGroupLookUpMapper();
+    private static final TaxComponentMapper TAX_COMPONENT_MAPPER = new TaxComponentMapper();
+    private static final TaxGroupMapper TAX_GROUP_MAPPER = new TaxGroupMapper();
+    private static final TaxComponentLookUpMapper TAX_COMPONENT_LOOK_UP_MAPPER = new TaxComponentLookUpMapper();
+    private static final TaxGroupLookUpMapper TAX_GROUP_LOOK_UP_MAPPER = new TaxGroupLookUpMapper();
 
     private final JdbcTemplate jdbcTemplate;
     private final AccountingDropdownReadPlatformService accountingDropdownReadPlatformService;
 
-    @Autowired
-    public TaxReadPlatformServiceImpl(final JdbcTemplate jdbcTemplate,
-            final AccountingDropdownReadPlatformService accountingDropdownReadPlatformService) {
-        this.jdbcTemplate = jdbcTemplate;
-        this.accountingDropdownReadPlatformService = accountingDropdownReadPlatformService;
-    }
-
     @Override
     public Collection<TaxComponentData> retrieveAllTaxComponents() {
-        String sql = "select " + this.taxComponentMapper.getSchema();
-        return this.jdbcTemplate.query(sql, this.taxComponentMapper); // NOSONAR
+        String sql = "select " + TAX_COMPONENT_MAPPER.getSchema();
+        return this.jdbcTemplate.query(sql, TAX_COMPONENT_MAPPER); // NOSONAR
     }
 
     @Override
     public TaxComponentData retrieveTaxComponentData(final Long id) {
-        String sql = "select " + this.taxComponentMapper.getSchema() + " where tc.id=?";
-        return this.jdbcTemplate.queryForObject(sql, this.taxComponentMapper, new Object[] { id }); // NOSONAR
+        String sql = "select " + TAX_COMPONENT_MAPPER.getSchema() + " where tc.id=?";
+        return this.jdbcTemplate.queryForObject(sql, TAX_COMPONENT_MAPPER, id); // NOSONAR
     }
 
     @Override
@@ -76,14 +68,14 @@ public class TaxReadPlatformServiceImpl implements TaxReadPlatformService {
 
     @Override
     public Collection<TaxGroupData> retrieveAllTaxGroups() {
-        String sql = "select " + this.taxGroupMapper.getSchema();
-        return this.jdbcTemplate.query(sql, this.taxGroupMapper); // NOSONAR
+        String sql = "select " + TAX_GROUP_MAPPER.getSchema();
+        return this.jdbcTemplate.query(sql, TAX_GROUP_MAPPER); // NOSONAR
     }
 
     @Override
     public TaxGroupData retrieveTaxGroupData(final Long id) {
-        String sql = "select " + this.taxGroupMapper.getSchema() + " where tg.id=?";
-        return this.jdbcTemplate.queryForObject(sql, this.taxGroupMapper, new Object[] { id }); // NOSONAR
+        String sql = "select " + TAX_GROUP_MAPPER.getSchema() + " where tg.id=?";
+        return this.jdbcTemplate.queryForObject(sql, TAX_GROUP_MAPPER, id); // NOSONAR
     }
 
     @Override
@@ -99,20 +91,20 @@ public class TaxReadPlatformServiceImpl implements TaxReadPlatformService {
     }
 
     private Collection<TaxComponentData> retrieveTaxComponentsForLookUp() {
-        String sql = "select " + this.taxComponentLookUpMapper.getSchema();
-        return this.jdbcTemplate.query(sql, this.taxComponentLookUpMapper); // NOSONAR
+        String sql = "select " + TAX_COMPONENT_LOOK_UP_MAPPER.getSchema();
+        return this.jdbcTemplate.query(sql, TAX_COMPONENT_LOOK_UP_MAPPER); // NOSONAR
     }
 
     @Override
     public Collection<TaxGroupData> retrieveTaxGroupsForLookUp() {
-        String sql = "select " + this.taxGroupLookUpMapper.getSchema();
-        return this.jdbcTemplate.query(sql, this.taxGroupLookUpMapper); // NOSONAR
+        String sql = "select " + TAX_GROUP_LOOK_UP_MAPPER.getSchema();
+        return this.jdbcTemplate.query(sql, TAX_GROUP_LOOK_UP_MAPPER); // NOSONAR
     }
 
     private static final class TaxComponentMapper implements RowMapper<TaxComponentData> {
 
         private final String schema;
-        private TaxComponentHistoryDataMapper componentHistoryDataMapper = new TaxComponentHistoryDataMapper();
+        private final TaxComponentHistoryDataMapper componentHistoryDataMapper = new TaxComponentHistoryDataMapper();
 
         TaxComponentMapper() {
             StringBuilder sb = new StringBuilder();

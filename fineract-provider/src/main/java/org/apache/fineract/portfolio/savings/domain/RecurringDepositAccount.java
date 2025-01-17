@@ -23,6 +23,13 @@ import static org.apache.fineract.portfolio.savings.DepositsApiConstants.deposit
 import static org.apache.fineract.portfolio.savings.DepositsApiConstants.maxDepositTermParamName;
 import static org.apache.fineract.portfolio.savings.DepositsApiConstants.onAccountClosureIdParamName;
 
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.DiscriminatorValue;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OneToOne;
+import jakarta.persistence.OrderBy;
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.time.LocalDate;
@@ -35,16 +42,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import javax.persistence.CascadeType;
-import javax.persistence.DiscriminatorValue;
-import javax.persistence.Entity;
-import javax.persistence.FetchType;
-import javax.persistence.OneToMany;
-import javax.persistence.OneToOne;
-import javax.persistence.OrderBy;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.ApiParameterError;
 import org.apache.fineract.infrastructure.core.data.DataValidatorBuilder;
+import org.apache.fineract.infrastructure.core.domain.ExternalId;
 import org.apache.fineract.infrastructure.core.domain.LocalDateInterval;
 import org.apache.fineract.infrastructure.core.exception.PlatformApiDataValidationException;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
@@ -69,6 +70,7 @@ import org.apache.fineract.portfolio.savings.SavingsPeriodFrequencyType;
 import org.apache.fineract.portfolio.savings.SavingsPostingInterestPeriodType;
 import org.apache.fineract.portfolio.savings.data.SavingsAccountTransactionDTO;
 import org.apache.fineract.portfolio.savings.domain.interest.PostingPeriod;
+import org.apache.fineract.portfolio.savings.domain.interest.SavingsAccountTransactionDetailsForPostingPeriod;
 import org.apache.fineract.portfolio.savings.service.SavingsEnumerations;
 import org.apache.fineract.useradministration.domain.AppUser;
 
@@ -94,7 +96,7 @@ public class RecurringDepositAccount extends SavingsAccount {
     }
 
     public static RecurringDepositAccount createNewApplicationForSubmittal(final Client client, final Group group,
-            final SavingsProduct product, final Staff fieldOfficer, final String accountNo, final String externalId,
+            final SavingsProduct product, final Staff fieldOfficer, final String accountNo, final ExternalId externalId,
             final AccountType accountType, final LocalDate submittedOnDate, final AppUser submittedBy, final BigDecimal interestRate,
             final SavingsCompoundingInterestPeriodType interestCompoundingPeriodType,
             final SavingsPostingInterestPeriodType interestPostingPeriodType, final SavingsInterestCalculationType interestCalculationType,
@@ -116,7 +118,7 @@ public class RecurringDepositAccount extends SavingsAccount {
     }
 
     public static RecurringDepositAccount createNewActivatedAccount(final Client client, final Group group, final SavingsProduct product,
-            final Staff fieldOfficer, final String accountNo, final String externalId, final AccountType accountType,
+            final Staff fieldOfficer, final String accountNo, final ExternalId externalId, final AccountType accountType,
             final LocalDate submittedOnDate, final AppUser submittedBy, final BigDecimal interestRate,
             final SavingsCompoundingInterestPeriodType interestCompoundingPeriodType,
             final SavingsPostingInterestPeriodType interestPostingPeriodType, final SavingsInterestCalculationType interestCalculationType,
@@ -138,7 +140,7 @@ public class RecurringDepositAccount extends SavingsAccount {
     }
 
     private RecurringDepositAccount(final Client client, final Group group, final SavingsProduct product, final Staff fieldOfficer,
-            final String accountNo, final String externalId, final SavingsAccountStatusType status, final AccountType accountType,
+            final String accountNo, final ExternalId externalId, final SavingsAccountStatusType status, final AccountType accountType,
             final LocalDate submittedOnDate, final AppUser submittedBy, final BigDecimal nominalAnnualInterestRate,
             final SavingsCompoundingInterestPeriodType interestCompoundingPeriodType,
             final SavingsPostingInterestPeriodType interestPostingPeriodType, final SavingsInterestCalculationType interestCalculationType,
@@ -284,7 +286,7 @@ public class RecurringDepositAccount extends SavingsAccount {
         }
 
         final LocalDate todayDate = DateUtils.getBusinessLocalDate();
-        if (!this.maturityDate().isAfter(todayDate)) {
+        if (!DateUtils.isAfter(this.maturityDate(), todayDate)) {
             // update account status
             this.status = SavingsAccountStatusType.MATURED.getValue();
             postMaturityInterest(isSavingsInterestPostingAtCurrentPeriodEnd, financialYearBeginningMonth, todayDate, postReversals);
@@ -348,22 +350,25 @@ public class RecurringDepositAccount extends SavingsAccount {
         final Collection<Long> interestPostTransactions = this.savingsHelper.fetchPostInterestTransactionIds(getId());
         boolean isInterestTransfer = false;
         final Money minBalanceForInterestCalculation = Money.of(getCurrency(), minBalanceForInterestCalculation());
+        List<SavingsAccountTransactionDetailsForPostingPeriod> savingsAccountTransactionDetailsForPostingPeriodList = toSavingsAccountTransactionDetailsForPostingPeriodList(
+                transactions);
         for (final LocalDateInterval periodInterval : postingPeriodIntervals) {
             boolean isUserPosting = false;
             if (PostedAsOnDates.contains(periodInterval.endDate())) {
                 isUserPosting = true;
             }
-            final PostingPeriod postingPeriod = PostingPeriod.createFrom(periodInterval, periodStartingBalance, transactions, this.currency,
-                    compoundingPeriodType, interestCalculationType, interestRateAsFraction, daysInYearType.getValue(), maturityDate,
-                    interestPostTransactions, isInterestTransfer, minBalanceForInterestCalculation,
-                    isSavingsInterestPostingAtCurrentPeriodEnd, isUserPosting, financialYearBeginningMonth);
+            final PostingPeriod postingPeriod = PostingPeriod.createFrom(periodInterval, periodStartingBalance,
+                    savingsAccountTransactionDetailsForPostingPeriodList, this.currency, compoundingPeriodType, interestCalculationType,
+                    interestRateAsFraction, daysInYearType.getValue(), maturityDate, interestPostTransactions, isInterestTransfer,
+                    minBalanceForInterestCalculation, isSavingsInterestPostingAtCurrentPeriodEnd, isUserPosting,
+                    financialYearBeginningMonth);
 
             periodStartingBalance = postingPeriod.closingBalance();
 
             allPostingPeriods.add(postingPeriod);
         }
 
-        this.savingsHelper.calculateInterestForAllPostingPeriods(this.currency, allPostingPeriods, this.getLockedInUntilLocalDate(),
+        this.savingsHelper.calculateInterestForAllPostingPeriods(this.currency, allPostingPeriods, this.getLockedInUntilDate(),
                 isTransferInterestToOtherAccount());
         // this.summary.updateFromInterestPeriodSummaries(this.currency,
         // allPostingPeriods);
@@ -376,8 +381,8 @@ public class RecurringDepositAccount extends SavingsAccount {
         allTransactions.addAll(retreiveOrderedNonInterestPostingTransactions());
         LocalDate latestTransactionDate = null;
         for (final SavingsAccountTransaction installment : allTransactions) {
-            if (latestTransactionDate == null || latestTransactionDate.isBefore(installment.getTransactionLocalDate())) {
-                latestTransactionDate = installment.getTransactionLocalDate();
+            if (latestTransactionDate == null || DateUtils.isBefore(latestTransactionDate, installment.getTransactionDate())) {
+                latestTransactionDate = installment.getTransactionDate();
             }
         }
         String refNo = null;
@@ -385,11 +390,11 @@ public class RecurringDepositAccount extends SavingsAccount {
             for (RecurringDepositScheduleInstallment installment : depositScheduleInstallments()) {
                 if (installment.isPrincipalNotCompleted(getCurrency())) {
                     LocalDate dueDate = installment.dueDate();
-                    if (latestTransactionDate != null && dueDate.isBefore(latestTransactionDate)) {
+                    if (DateUtils.isBefore(dueDate, latestTransactionDate)) {
                         dueDate = latestTransactionDate;
                     }
                     final SavingsAccountTransaction transaction = SavingsAccountTransaction.deposit(null, office(), null, dueDate,
-                            installment.getDepositAmountOutstanding(getCurrency()), DateUtils.getLocalDateTimeOfSystem(), null, refNo);
+                            installment.getDepositAmountOutstanding(getCurrency()), refNo);
                     allTransactions.add(transaction);
                 }
             }
@@ -401,7 +406,6 @@ public class RecurringDepositAccount extends SavingsAccount {
             if (transaction.isReversed()) {
                 transaction.zeroBalanceFields();
             } else {
-
                 Money transactionAmount = Money.zero(this.currency);
                 if (transaction.isCredit()) {
                     transactionAmount = transactionAmount.plus(transaction.getAmount(this.currency));
@@ -410,7 +414,7 @@ public class RecurringDepositAccount extends SavingsAccount {
                 }
 
                 runningBalance = runningBalance.plus(transactionAmount);
-                transaction.updateRunningBalance(runningBalance);
+                transaction.setRunningBalance(runningBalance);
             }
         }
         // loop over transactions in reverse
@@ -419,7 +423,7 @@ public class RecurringDepositAccount extends SavingsAccount {
             final SavingsAccountTransaction transaction = allTransactions.get(i);
             if (transaction.isNotReversed() && !transaction.isInterestPostingAndNotReversed()) {
                 transaction.updateCumulativeBalanceAndDates(this.currency, endOfBalanceDate);
-                endOfBalanceDate = transaction.transactionLocalDate().minusDays(1);
+                endOfBalanceDate = transaction.getTransactionDate().minusDays(1);
             }
         }
         return allTransactions;
@@ -433,9 +437,7 @@ public class RecurringDepositAccount extends SavingsAccount {
         return depositStartDate;
     }
 
-    public void prematureClosure(final AppUser currentUser, final JsonCommand command, final LocalDate tenantsTodayDate,
-            final Map<String, Object> actualChanges) {
-
+    public void prematureClosure(final AppUser currentUser, final JsonCommand command, final Map<String, Object> actualChanges) {
         final List<ApiParameterError> dataValidationErrors = new ArrayList<>();
         final DataValidatorBuilder baseDataValidator = new DataValidatorBuilder(dataValidationErrors)
                 .resource(RECURRING_DEPOSIT_ACCOUNT_RESOURCE_NAME + DepositsApiConstants.preMatureCloseAction);
@@ -452,14 +454,13 @@ public class RecurringDepositAccount extends SavingsAccount {
         final DateTimeFormatter fmt = DateTimeFormatter.ofPattern(command.dateFormat()).withLocale(locale);
         final LocalDate closedDate = command.localDateValueOfParameterNamed(SavingsApiConstants.closedOnDateParamName);
 
-        if (closedDate.isBefore(getActivationLocalDate())) {
+        if (DateUtils.isBefore(closedDate, getActivationDate())) {
             baseDataValidator.reset().parameter(SavingsApiConstants.closedOnDateParamName).value(closedDate)
                     .failWithCode("must.be.after.activation.date");
             if (!dataValidationErrors.isEmpty()) {
                 throw new PlatformApiDataValidationException(dataValidationErrors);
             }
         }
-
         if (isAccountLocked(closedDate)) {
             baseDataValidator.reset().parameter(SavingsApiConstants.closedOnDateParamName).value(closedDate)
                     .failWithCode("must.be.after.lockin.period");
@@ -467,16 +468,14 @@ public class RecurringDepositAccount extends SavingsAccount {
                 throw new PlatformApiDataValidationException(dataValidationErrors);
             }
         }
-
-        if (closedDate.isAfter(maturityDate())) {
+        if (maturityDate() != null && DateUtils.isAfter(closedDate, maturityDate())) {
             baseDataValidator.reset().parameter(SavingsApiConstants.closedOnDateParamName).value(closedDate)
                     .failWithCode("must.be.before.maturity.date");
             if (!dataValidationErrors.isEmpty()) {
                 throw new PlatformApiDataValidationException(dataValidationErrors);
             }
         }
-
-        if (closedDate.isAfter(tenantsTodayDate)) {
+        if (DateUtils.isAfterBusinessDate(closedDate)) {
             baseDataValidator.reset().parameter(SavingsApiConstants.closedOnDateParamName).value(closedDate)
                     .failWithCode("cannot.be.a.future.date");
             if (!dataValidationErrors.isEmpty()) {
@@ -492,7 +491,7 @@ public class RecurringDepositAccount extends SavingsAccount {
             }
         }
 
-        final List<SavingsAccountTransaction> savingsAccountTransactions = retreiveListOfTransactions();
+        final List<SavingsAccountTransaction> savingsAccountTransactions = retrieveListOfTransactions();
         if (savingsAccountTransactions.size() > 0) {
             final SavingsAccountTransaction accountTransaction = savingsAccountTransactions.get(savingsAccountTransactions.size() - 1);
             if (accountTransaction.isAfter(closedDate)) {
@@ -537,14 +536,14 @@ public class RecurringDepositAccount extends SavingsAccount {
         return Money.of(this.currency, this.minRequiredOpeningBalance);
     }
 
-    protected void processAccountUponActivation(final DateTimeFormatter fmt, final AppUser user, final boolean postReversals) {
+    protected void processAccountUponActivation(final DateTimeFormatter fmt, final boolean postReversals) {
         final Money minRequiredOpeningBalance = Money.of(this.currency, this.minRequiredOpeningBalance);
         final boolean backdatedTxnsAllowedTill = false;
         String refNo = null;
         final Long relaxingDaysConfigForPivotDate = this.configurationDomainService.retrieveRelaxingDaysConfigForPivotDate();
         if (minRequiredOpeningBalance.isGreaterThanZero()) {
-            final SavingsAccountTransactionDTO transactionDTO = new SavingsAccountTransactionDTO(fmt, getActivationLocalDate(),
-                    minRequiredOpeningBalance.getAmount(), null, DateUtils.getLocalDateTimeOfSystem(), user, accountType);
+            final SavingsAccountTransactionDTO transactionDTO = new SavingsAccountTransactionDTO(fmt, getActivationDate(),
+                    minRequiredOpeningBalance.getAmount(), null, null, accountType);
             deposit(transactionDTO, backdatedTxnsAllowedTill, relaxingDaysConfigForPivotDate, refNo);
 
             // update existing transactions so derived balance fields are
@@ -553,9 +552,7 @@ public class RecurringDepositAccount extends SavingsAccount {
         }
     }
 
-    public void close(final AppUser currentUser, final JsonCommand command, final LocalDate tenantsTodayDate,
-            final Map<String, Object> actualChanges) {
-
+    public void close(final AppUser currentUser, final JsonCommand command, final Map<String, Object> actualChanges) {
         final List<ApiParameterError> dataValidationErrors = new ArrayList<>();
         final DataValidatorBuilder baseDataValidator = new DataValidatorBuilder(dataValidationErrors)
                 .resource(RECURRING_DEPOSIT_ACCOUNT_RESOURCE_NAME + SavingsApiConstants.closeAction);
@@ -572,28 +569,28 @@ public class RecurringDepositAccount extends SavingsAccount {
         final DateTimeFormatter fmt = DateTimeFormatter.ofPattern(command.dateFormat()).withLocale(locale);
         final LocalDate closedDate = command.localDateValueOfParameterNamed(SavingsApiConstants.closedOnDateParamName);
 
-        if (closedDate.isBefore(getActivationLocalDate())) {
+        if (DateUtils.isBefore(closedDate, getActivationDate())) {
             baseDataValidator.reset().parameter(SavingsApiConstants.closedOnDateParamName).value(closedDate)
                     .failWithCode("must.be.after.activation.date");
             if (!dataValidationErrors.isEmpty()) {
                 throw new PlatformApiDataValidationException(dataValidationErrors);
             }
         }
-        if (maturityDate() != null && closedDate.isBefore(maturityDate())) {
+        if (maturityDate() != null && DateUtils.isBefore(closedDate, maturityDate())) {
             baseDataValidator.reset().parameter(SavingsApiConstants.closedOnDateParamName).value(closedDate)
                     .failWithCode("must.be.after.account.maturity.date");
             if (!dataValidationErrors.isEmpty()) {
                 throw new PlatformApiDataValidationException(dataValidationErrors);
             }
         }
-        if (closedDate.isAfter(tenantsTodayDate)) {
+        if (DateUtils.isAfterBusinessDate(closedDate)) {
             baseDataValidator.reset().parameter(SavingsApiConstants.closedOnDateParamName).value(closedDate)
                     .failWithCode("cannot.be.a.future.date");
             if (!dataValidationErrors.isEmpty()) {
                 throw new PlatformApiDataValidationException(dataValidationErrors);
             }
         }
-        final List<SavingsAccountTransaction> savingsAccountTransactions = retreiveListOfTransactions();
+        final List<SavingsAccountTransaction> savingsAccountTransactions = retrieveListOfTransactions();
         if (savingsAccountTransactions.size() > 0) {
             final SavingsAccountTransaction accountTransaction = savingsAccountTransactions.get(savingsAccountTransactions.size() - 1);
             if (accountTransaction.isAfter(closedDate)) {
@@ -655,7 +652,8 @@ public class RecurringDepositAccount extends SavingsAccount {
         for (final PostingPeriod interestPostingPeriod : postingPeriods) {
 
             LocalDate interestPostingTransactionDate = interestPostingPeriod.dateOfPostingTransaction();
-            interestPostingTransactionDate = interestPostingTransactionDate.isAfter(interestPostingUpToDate) ? interestPostingUpToDate
+            interestPostingTransactionDate = DateUtils.isAfter(interestPostingTransactionDate, interestPostingUpToDate)
+                    ? interestPostingUpToDate
                     : interestPostingTransactionDate;
             final Money interestEarnedToBePostedForPeriod = interestPostingPeriod.getInterestEarned();
 
@@ -773,14 +771,14 @@ public class RecurringDepositAccount extends SavingsAccount {
     private LocalDate interestPostingUpToDate(final LocalDate interestPostingDate) {
         LocalDate interestPostingUpToDate = interestPostingDate;
         final LocalDate uptoMaturityDate = interestCalculatedUpto();
-        if (uptoMaturityDate != null && uptoMaturityDate.isBefore(interestPostingDate)) {
+        if (uptoMaturityDate != null && DateUtils.isBefore(uptoMaturityDate, interestPostingDate)) {
             interestPostingUpToDate = uptoMaturityDate;
         }
         return interestPostingUpToDate;
     }
 
     public LocalDate maturityDate() {
-        return this.accountTermAndPreClosure.getMaturityLocalDate();
+        return this.accountTermAndPreClosure.getMaturityDate();
     }
 
     public BigDecimal maturityAmount() {
@@ -809,11 +807,10 @@ public class RecurringDepositAccount extends SavingsAccount {
     }
 
     @Override
-    public Map<String, Object> activate(final AppUser currentUser, final JsonCommand command, final LocalDate tenantsTodayDate) {
+    public Map<String, Object> activate(final AppUser currentUser, final JsonCommand command) {
+        final Map<String, Object> actualChanges = super.activate(currentUser, command);
 
-        final Map<String, Object> actualChanges = super.activate(currentUser, command, tenantsTodayDate);
-
-        if (accountTermAndPreClosure.isAfterExpectedFirstDepositDate(getActivationLocalDate())) {
+        if (accountTermAndPreClosure.isAfterExpectedFirstDepositDate(getActivationDate())) {
             final List<ApiParameterError> dataValidationErrors = new ArrayList<>();
             final DataValidatorBuilder baseDataValidator = new DataValidatorBuilder(dataValidationErrors)
                     .resource(RECURRING_DEPOSIT_ACCOUNT_RESOURCE_NAME);
@@ -885,13 +882,12 @@ public class RecurringDepositAccount extends SavingsAccount {
     }
 
     public void handleScheduleInstallments(final SavingsAccountTransaction transaction) {
-
-        final LocalDate transactionDate = transaction.transactionLocalDate();
+        final LocalDate transactionDate = transaction.getTransactionDate();
         Money transactionAmountUnprocessed = transaction.getAmount(getCurrency());
 
         for (RecurringDepositScheduleInstallment currentInstallment : depositScheduleInstallments()) {
             if (currentInstallment.isNotFullyPaidOff() && transactionAmountUnprocessed.isGreaterThanZero()) {
-                if (!this.adjustAdvanceTowardsFuturePayments() && currentInstallment.dueDate().isAfter(transactionDate)) {
+                if (!this.adjustAdvanceTowardsFuturePayments() && DateUtils.isBefore(transactionDate, currentInstallment.dueDate())) {
                     transactionAmountUnprocessed = Money.zero(getCurrency());
                 }
                 transactionAmountUnprocessed = handleInstallmentTransaction(currentInstallment, transactionAmountUnprocessed,
@@ -902,7 +898,6 @@ public class RecurringDepositAccount extends SavingsAccount {
     }
 
     public void updateScheduleInstallments() {
-
         // reset all installments to process from the beginning
         for (RecurringDepositScheduleInstallment currentInstallment : depositScheduleInstallments()) {
             currentInstallment.resetDerivedFields();
@@ -919,8 +914,7 @@ public class RecurringDepositAccount extends SavingsAccount {
         // reset all installments to process from the beginning, also update
         // deposit amount as necessary
         for (RecurringDepositScheduleInstallment currentInstallment : depositScheduleInstallments()) {
-            if (currentInstallment.dueDate().isAfter(depositAmountupdatedFromDate)
-                    || currentInstallment.dueDate().isEqual(depositAmountupdatedFromDate)) {
+            if (!DateUtils.isAfter(depositAmountupdatedFromDate, currentInstallment.dueDate())) {
                 currentInstallment.updateDepositAmountAndResetDerivedFields(newDepositAmount);
             } else {
                 currentInstallment.resetDerivedFields();
@@ -934,7 +928,7 @@ public class RecurringDepositAccount extends SavingsAccount {
     }
 
     private List<SavingsAccountTransaction> retreiveOrderedDepositTransactions() {
-        final List<SavingsAccountTransaction> listOfTransactionsSorted = retreiveListOfTransactions();
+        final List<SavingsAccountTransaction> listOfTransactionsSorted = retrieveListOfTransactions();
 
         final List<SavingsAccountTransaction> orderedDepositTransactions = new ArrayList<>();
 
@@ -955,19 +949,14 @@ public class RecurringDepositAccount extends SavingsAccount {
      */
     protected boolean isTransactionInAdvanceOfInstallment(final int currentInstallmentIndex,
             final List<RecurringDepositScheduleInstallment> installments, final LocalDate transactionDate) {
-
         final RecurringDepositScheduleInstallment currentInstallment = installments.get(currentInstallmentIndex);
-
-        return transactionDate.isBefore(currentInstallment.dueDate());
+        return DateUtils.isBefore(transactionDate, currentInstallment.dueDate());
     }
 
     private Money handleInstallmentTransaction(final RecurringDepositScheduleInstallment currentInstallment,
             final Money transactionAmountUnprocessed, final LocalDate transactionDate) {
-
         Money transactionAmountRemaining = transactionAmountUnprocessed;
-        Money depositAmountPortion = Money.zero(transactionAmountRemaining.getCurrency());
-
-        depositAmountPortion = currentInstallment.payInstallment(transactionDate, transactionAmountRemaining);
+        Money depositAmountPortion = currentInstallment.payInstallment(transactionDate, transactionAmountRemaining);
         transactionAmountRemaining = transactionAmountRemaining.minus(depositAmountPortion);
 
         return transactionAmountRemaining;
@@ -980,11 +969,11 @@ public class RecurringDepositAccount extends SavingsAccount {
 
     private boolean isBeforeMaturityDate(final LocalDate compareDate) {
         final LocalDate maturityDate = this.maturityDate();
-        return maturityDate == null ? true : compareDate.isBefore(maturityDate);
+        return maturityDate == null || DateUtils.isBefore(compareDate, maturityDate);
     }
 
     private boolean isBeforeDepositStartDate(LocalDate compareDate) {
-        return compareDate.isBefore(depositStartDate());
+        return DateUtils.isBefore(compareDate, depositStartDate());
     }
 
     public void validateDomainRules() {
@@ -999,7 +988,6 @@ public class RecurringDepositAccount extends SavingsAccount {
     }
 
     private void validateDomainRules(final DataValidatorBuilder baseDataValidator) {
-
         final boolean isMinTermGreaterThanMax = this.accountTermAndPreClosure.depositTermDetail()
                 .isMinDepositTermGreaterThanMaxDepositTerm();
         // deposit period should be within min and max deposit term
@@ -1059,8 +1047,8 @@ public class RecurringDepositAccount extends SavingsAccount {
                 .resource(RECURRING_DEPOSIT_ACCOUNT_RESOURCE_NAME);
         LocalDate maturityDate = calculateMaturityDate();
         if (this.chart != null) {
-            final LocalDate chartFromDate = this.chart.getFromDateAsLocalDate();
-            LocalDate chartEndDate = this.chart.getEndDateAsLocalDate();
+            final LocalDate chartFromDate = this.chart.getFromDate();
+            LocalDate chartEndDate = this.chart.getEndDate();
             chartEndDate = chartEndDate == null ? DateUtils.getBusinessLocalDate() : chartEndDate;
 
             final LocalDateInterval chartInterval = LocalDateInterval.create(chartFromDate, chartEndDate);
@@ -1076,7 +1064,7 @@ public class RecurringDepositAccount extends SavingsAccount {
             BigDecimal applicableInterestRate = this.chart.getApplicableInterestRate(maturityAmount, depositStartDate(), maturityDate,
                     this.client);
 
-            if (applicableInterestRate.compareTo(BigDecimal.ZERO) == 0 ? Boolean.TRUE : Boolean.FALSE) {
+            if (applicableInterestRate.compareTo(BigDecimal.ZERO) == 0) {
                 baseDataValidator.reset()
                         .failWithCodeNoParameterAddedToErrorCode("no.applicable.interest.rate.is.found.based.on.amount.and.deposit.period");
             }
@@ -1088,13 +1076,13 @@ public class RecurringDepositAccount extends SavingsAccount {
         if (!dataValidationErrors.isEmpty()) {
             throw new PlatformApiDataValidationException(dataValidationErrors);
         }
-        /**
+        /*
          * final boolean recurringFrequencyBeforeDepositPeriod = recurringFrequencyBeforeDepositPeriod();
          *
          * if (!recurringFrequencyBeforeDepositPeriod) {
          * baseDataValidator.reset().failWithCodeNoParameterAddedToErrorCode(
          * "recurring.frequency.not.before.deposit.period"); }
-         **/
+         */
     }
 
     public boolean isReinvestOnClosure() {
@@ -1113,7 +1101,7 @@ public class RecurringDepositAccount extends SavingsAccount {
         final InterestRateChart productChart = product.applicableChart(getClosedOnDate());
         final DepositAccountInterestRateChart newChart = DepositAccountInterestRateChart.from(productChart);
         final String accountNumber = null;
-        final String externalId = this.externalId;
+        final ExternalId externalId = this.externalId;
         final AccountType accountType = AccountType.fromInt(this.accountType);
         final SavingsPostingInterestPeriodType postingPeriodType = SavingsPostingInterestPeriodType.fromInt(this.interestPostingPeriodType);
         final SavingsCompoundingInterestPeriodType compoundingPeriodType = SavingsCompoundingInterestPeriodType
@@ -1147,10 +1135,8 @@ public class RecurringDepositAccount extends SavingsAccount {
 
     private boolean firstDepositDateBeforeAccountSubmittedOrActivationDate() {
         final LocalDate expectedFirstDepositLocalDate = accountTermAndPreClosure.getExpectedFirstDepositOnDate();
-        if (expectedFirstDepositLocalDate == null) {
-            return false;
-        }
-        return expectedFirstDepositLocalDate.isBefore(accountSubmittedOrActivationDate());
+        return expectedFirstDepositLocalDate != null
+                && DateUtils.isBefore(expectedFirstDepositLocalDate, accountSubmittedOrActivationDate());
     }
 
     public void setDatesFrom(final LocalDate now) {
@@ -1188,7 +1174,7 @@ public class RecurringDepositAccount extends SavingsAccount {
         int installmentNumber = 1;
         final LocalDate maturityDate = calcualteScheduleTillDate(frequency, recurringEvery);
         final BigDecimal depositAmount = this.recurringDetail.mandatoryRecommendedDepositAmount();
-        while (maturityDate.isAfter(installmentDate)) {
+        while (DateUtils.isBefore(installmentDate, maturityDate)) {
             final RecurringDepositScheduleInstallment installment = RecurringDepositScheduleInstallment.installment(this, installmentNumber,
                     installmentDate, depositAmount);
             addDepositScheduleInstallment(installment);
@@ -1222,7 +1208,7 @@ public class RecurringDepositAccount extends SavingsAccount {
 
     public void updateOverduePayments(final LocalDate todayDate) {
         LocalDate overdueUptoDate = this.maturityDate();
-        if (overdueUptoDate == null || overdueUptoDate.isAfter(todayDate)) {
+        if (overdueUptoDate == null || DateUtils.isAfter(overdueUptoDate, todayDate)) {
             overdueUptoDate = todayDate;
         }
 
@@ -1230,7 +1216,7 @@ public class RecurringDepositAccount extends SavingsAccount {
         int noOfOverdueInstallments = 0;
         Money totalOverdueAmount = Money.zero(getCurrency());
         for (RecurringDepositScheduleInstallment installment : installments) {
-            if (installment.isNotFullyPaidOff() && overdueUptoDate.isAfter(installment.dueDate())) {
+            if (installment.isNotFullyPaidOff() && DateUtils.isAfter(overdueUptoDate, installment.dueDate())) {
                 noOfOverdueInstallments++;
                 totalOverdueAmount = totalOverdueAmount.plus(installment.getDepositAmountOutstanding(getCurrency()));
             }

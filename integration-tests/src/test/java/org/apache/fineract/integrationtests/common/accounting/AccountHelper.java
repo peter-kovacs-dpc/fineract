@@ -22,10 +22,13 @@ import io.restassured.specification.RequestSpecification;
 import io.restassured.specification.ResponseSpecification;
 import java.util.ArrayList;
 import java.util.HashMap;
+import org.apache.fineract.client.models.PostGLAccountsRequest;
+import org.apache.fineract.client.models.PostGLAccountsResponse;
+import org.apache.fineract.integrationtests.client.IntegrationTest;
 import org.apache.fineract.integrationtests.common.Utils;
 
 @SuppressWarnings("rawtypes")
-public class AccountHelper {
+public class AccountHelper extends IntegrationTest {
 
     private static final String CREATE_GL_ACCOUNT_URL = "/fineract-provider/api/v1/glaccounts?" + Utils.TENANT_IDENTIFIER;
     private static final String GL_ACCOUNT_ID_RESPONSE = "resourceId";
@@ -39,31 +42,58 @@ public class AccountHelper {
     }
 
     public Account createAssetAccount() {
-        final String assetAccountJSON = new GLAccountBuilder().withAccountTypeAsAsset().build();
+        return this.createAssetAccount(null);
+    }
+
+    public Account createIncomeAccount() {
+        return this.createIncomeAccount(null);
+    }
+
+    public Account createExpenseAccount() {
+        return this.createExpenseAccount(null);
+    }
+
+    public Account createLiabilityAccount() {
+        return this.createLiabilityAccount(null);
+    }
+
+    public Account createEquityAccount() {
+        return this.createEquityAccount(null);
+    }
+
+    public Account createAssetAccount(String accountName) {
+        final String assetAccountJSON = new GLAccountBuilder().withName(accountName).withAccountTypeAsAsset().build();
         final Integer accountID = Utils.performServerPost(this.requestSpec, this.responseSpec, CREATE_GL_ACCOUNT_URL, assetAccountJSON,
                 GL_ACCOUNT_ID_RESPONSE);
         return new Account(accountID, Account.AccountType.ASSET);
     }
 
-    public Account createIncomeAccount() {
-        final String assetAccountJSON = new GLAccountBuilder().withAccountTypeAsIncome().build();
+    public Account createIncomeAccount(String accountName) {
+        final String assetAccountJSON = new GLAccountBuilder().withName(accountName).withAccountTypeAsIncome().build();
         final Integer accountID = Utils.performServerPost(this.requestSpec, this.responseSpec, CREATE_GL_ACCOUNT_URL, assetAccountJSON,
                 GL_ACCOUNT_ID_RESPONSE);
         return new Account(accountID, Account.AccountType.INCOME);
     }
 
-    public Account createExpenseAccount() {
-        final String assetAccountJSON = new GLAccountBuilder().withAccountTypeAsExpense().build();
+    public Account createExpenseAccount(String accountName) {
+        final String assetAccountJSON = new GLAccountBuilder().withName(accountName).withAccountTypeAsExpense().build();
         final Integer accountID = Utils.performServerPost(this.requestSpec, this.responseSpec, CREATE_GL_ACCOUNT_URL, assetAccountJSON,
                 GL_ACCOUNT_ID_RESPONSE);
         return new Account(accountID, Account.AccountType.EXPENSE);
     }
 
-    public Account createLiabilityAccount() {
-        final String liabilityAccountJSON = new GLAccountBuilder().withAccountTypeAsLiability().build();
+    public Account createLiabilityAccount(String accountName) {
+        final String liabilityAccountJSON = new GLAccountBuilder().withName(accountName).withAccountTypeAsLiability().build();
         final Integer accountID = Utils.performServerPost(this.requestSpec, this.responseSpec, CREATE_GL_ACCOUNT_URL, liabilityAccountJSON,
                 GL_ACCOUNT_ID_RESPONSE);
         return new Account(accountID, Account.AccountType.LIABILITY);
+    }
+
+    public Account createEquityAccount(String accountName) {
+        final String equityAccountJSON = new GLAccountBuilder().withName(accountName).withAccountTypeAsAsEquity().build();
+        final Integer accountID = Utils.performServerPost(this.requestSpec, this.responseSpec, CREATE_GL_ACCOUNT_URL, equityAccountJSON,
+                GL_ACCOUNT_ID_RESPONSE);
+        return new Account(accountID, Account.AccountType.EQUITY);
     }
 
     public ArrayList getAccountingWithRunningBalances() {
@@ -77,6 +107,10 @@ public class AccountHelper {
         final String GET_RUNNING_BALANCE_URL = "/fineract-provider/api/v1/glaccounts/" + accountId + "?fetchRunningBalance=true";
         final HashMap accountRunningBalance = Utils.performServerGet(this.requestSpec, this.responseSpec, GET_RUNNING_BALANCE_URL, "");
         return accountRunningBalance;
+    }
+
+    public PostGLAccountsResponse createGLAccount(final PostGLAccountsRequest request) {
+        return ok(fineract().glAccounts.createGLAccount1(request));
     }
 
 }

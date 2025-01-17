@@ -19,60 +19,61 @@
 package org.apache.fineract.cob.loan;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
-import lombok.RequiredArgsConstructor;
+import java.util.Objects;
+import java.util.concurrent.LinkedBlockingQueue;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.fineract.cob.exceptions.LoanAccountWasAlreadyLocked;
-import org.apache.fineract.cob.exceptions.LoanReadException;
-import org.apache.fineract.portfolio.loanaccount.domain.Loan;
+import org.apache.fineract.cob.common.CustomJobParameterResolver;
+import org.apache.fineract.cob.data.LoanCOBParameter;
+import org.apache.fineract.cob.domain.LoanAccountLock;
+import org.apache.fineract.cob.domain.LockOwner;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanRepository;
-import org.apache.fineract.portfolio.loanaccount.exception.LoanNotFoundException;
 import org.jetbrains.annotations.NotNull;
-import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.StepExecution;
-import org.springframework.batch.core.annotation.AfterStep;
 import org.springframework.batch.core.annotation.BeforeStep;
 import org.springframework.batch.item.ExecutionContext;
-import org.springframework.batch.item.ItemReader;
 
 @Slf4j
-@RequiredArgsConstructor
-public class LoanItemReader implements ItemReader<Loan> {
+public class LoanItemReader extends AbstractLoanItemReader {
 
-    private final LoanRepository loanRepository;
-    private List<Long> alreadyLockedAccounts;
-    private List<Long> remainingData;
-    private Long loanId;
+    private final RetrieveLoanIdService retrieveLoanIdService;
+    private final CustomJobParameterResolver customJobParameterResolver;
+    private final LoanLockingService loanLockingService;
+
+    public LoanItemReader(LoanRepository loanRepository, RetrieveLoanIdService retrieveLoanIdService,
+            CustomJobParameterResolver customJobParameterResolver, LoanLockingService loanLockingService) {
+        super(loanRepository);
+        this.retrieveLoanIdService = retrieveLoanIdService;
+        this.customJobParameterResolver = customJobParameterResolver;
+        this.loanLockingService = loanLockingService;
+    }
 
     @BeforeStep
+    @SuppressWarnings({ "unchecked" })
     public void beforeStep(@NotNull StepExecution stepExecution) {
         ExecutionContext executionContext = stepExecution.getExecutionContext();
-        ExecutionContext jobExecutionContext = stepExecution.getJobExecution().getExecutionContext();
-        List<Long> loanIds = (List<Long>) executionContext.get(LoanCOBConstant.LOAN_IDS);
-        alreadyLockedAccounts = (List<Long>) jobExecutionContext.get(LoanCOBConstant.ALREADY_LOCKED_LOAN_IDS);
-        remainingData = new ArrayList<>(loanIds);
-    }
-
-    @Override
-    public Loan read() throws Exception {
-        try {
-            if (remainingData.size() > 0) {
-                loanId = remainingData.remove(0);
-                if (alreadyLockedAccounts != null && alreadyLockedAccounts.remove(loanId)) {
-                    throw new LoanAccountWasAlreadyLocked(loanId);
-                }
-
-                return loanRepository.findById(loanId).orElseThrow(() -> new LoanNotFoundException(loanId));
+        LoanCOBParameter loanCOBParameter = (LoanCOBParameter) executionContext.get(LoanCOBConstant.LOAN_COB_PARAMETER);
+        List<Long> loanIds;
+        if (Objects.isNull(loanCOBParameter)
+                || (Objects.isNull(loanCOBParameter.getMinLoanId()) && Objects.isNull(loanCOBParameter.getMaxLoanId()))
+                || (loanCOBParameter.getMinLoanId().equals(0L) && loanCOBParameter.getMaxLoanId().equals(0L))) {
+            loanIds = Collections.emptyList();
+        } else {
+            loanIds = retrieveLoanIdService.retrieveAllNonClosedLoansByLastClosedBusinessDateAndMinAndMaxLoanId(loanCOBParameter,
+                    customJobParameterResolver.getCustomJobParameterById(stepExecution, LoanCOBConstant.IS_CATCH_UP_PARAMETER_NAME)
+                            .map(Boolean::parseBoolean).orElse(false));
+            if (loanIds.size() > 0) {
+                List<Long> lockedByCOBChunkProcessingAccountIds = getLoanIdsLockedWithChunkProcessingLock(loanIds);
+                loanIds.retainAll(lockedByCOBChunkProcessingAccountIds);
             }
-        } catch (Exception e) {
-            throw new LoanReadException(loanId, e);
         }
-        return null;
-
+        setRemainingData(new LinkedBlockingQueue<>(loanIds));
     }
 
-    @AfterStep
-    public ExitStatus afterStep(@NotNull StepExecution stepExecution) {
-        return ExitStatus.COMPLETED;
+    private List<Long> getLoanIdsLockedWithChunkProcessingLock(List<Long> loanIds) {
+        List<LoanAccountLock> accountLocks = new ArrayList<>();
+        accountLocks.addAll(loanLockingService.findAllByLoanIdInAndLockOwner(loanIds, LockOwner.LOAN_COB_CHUNK_PROCESSING));
+        return accountLocks.stream().map(LoanAccountLock::getLoanId).toList();
     }
 }

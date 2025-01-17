@@ -147,7 +147,7 @@ public class GuarantorWorkbookPopulator extends AbstractWorkbookPopulator {
         dateCellStyle.setDataFormat(df);
         int rowIndex = 1;
         Row row;
-        Collections.sort(loans, LoanAccountData.ClientNameComparator);
+        loans.sort(LoanAccountData.LOAN_ACCOUNT_DATA_COMPARATOR_BY_CLIENT_NAME);
         for (LoanAccountData loan : loans) {
             if (addGuarantorSheet.getRow(rowIndex) == null) {
                 row = addGuarantorSheet.createRow(rowIndex++);
@@ -156,7 +156,7 @@ public class GuarantorWorkbookPopulator extends AbstractWorkbookPopulator {
             }
             writeString(GuarantorConstants.LOOKUP_CLIENT_NAME_COL, row, loan.getClientName() + "(" + loan.getClientId() + ")");
             writeString(GuarantorConstants.LOOKUP_ACCOUNT_NO_COL, row,
-                    Long.parseLong(loan.getAccountNo()) + "-" + loan.getStatusStringValue());
+                    Long.parseLong(loan.getAccountNo()) + "-" + loan.getStatus().getValue());
         }
     }
 

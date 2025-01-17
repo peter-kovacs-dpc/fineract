@@ -22,18 +22,14 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
 import org.apache.fineract.mix.data.MixTaxonomyData;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.stereotype.Service;
 
-@Service
 public class MixTaxonomyReadPlatformServiceImpl implements MixTaxonomyReadPlatformService {
 
     private final JdbcTemplate jdbcTemplate;
     private final MixTaxonomyMapper mixTaxonomyMapper;
 
-    @Autowired
     public MixTaxonomyReadPlatformServiceImpl(final JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
         this.mixTaxonomyMapper = new MixTaxonomyMapper();
@@ -55,7 +51,8 @@ public class MixTaxonomyReadPlatformServiceImpl implements MixTaxonomyReadPlatfo
             final String dimension = rs.getString("dimension");
             final Integer type = rs.getInt("type");
             final String desc = rs.getString("description");
-            return new MixTaxonomyData(id, name, namespace, dimension, type, desc);
+            return new MixTaxonomyData().setId(id).setName(name).setNamespace(namespace).setDimension(dimension).setType(type)
+                    .setDescription(desc);
         }
 
     }

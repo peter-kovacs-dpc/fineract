@@ -37,12 +37,12 @@ import java.util.Calendar;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 import org.apache.fineract.integrationtests.common.CalendarHelper;
 import org.apache.fineract.integrationtests.common.CenterDomain;
 import org.apache.fineract.integrationtests.common.CenterHelper;
 import org.apache.fineract.integrationtests.common.ClientHelper;
 import org.apache.fineract.integrationtests.common.CollateralManagementHelper;
-import org.apache.fineract.integrationtests.common.GlobalConfigurationHelper;
 import org.apache.fineract.integrationtests.common.GroupHelper;
 import org.apache.fineract.integrationtests.common.OfficeHelper;
 import org.apache.fineract.integrationtests.common.Utils;
@@ -58,7 +58,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class LoanReschedulingWithinCenterTest {
+public class LoanReschedulingWithinCenterTest extends BaseLoanIntegrationTest {
 
     private static final Logger LOG = LoggerFactory.getLogger(LoanReschedulingWithinCenterTest.class);
     private RequestSpecification requestSpec;
@@ -78,7 +78,7 @@ public class LoanReschedulingWithinCenterTest {
         this.loanApplicationApprovalTest = new LoanApplicationApprovalTest();
         this.generalResponseSpec = new ResponseSpecBuilder().build();
 
-        GlobalConfigurationHelper.verifyAllDefaultGlobalConfigurations(this.requestSpec, this.responseSpec);
+        globalConfigurationHelper.verifyAllDefaultGlobalConfigurations();
     }
 
     @SuppressWarnings("rawtypes")
@@ -87,7 +87,7 @@ public class LoanReschedulingWithinCenterTest {
 
         Integer officeId = new OfficeHelper(requestSpec, responseSpec).createOffice("01 July 2007");
         String name = "TestFullCreation" + new Timestamp(new java.util.Date().getTime());
-        String externalId = Utils.randomStringGenerator("ID_", 7, "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        String externalId = UUID.randomUUID().toString();
         int staffId = StaffHelper.createStaff(requestSpec, responseSpec);
         int[] groupMembers = generateGroupMembers(1, officeId);
         final String centerActivationDate = "01 July 2007";
@@ -220,7 +220,7 @@ public class LoanReschedulingWithinCenterTest {
 
         Integer officeId = new OfficeHelper(requestSpec, responseSpec).createOffice("01 July 2007");
         String name = "TestFullCreation" + new Timestamp(new java.util.Date().getTime());
-        String externalId = Utils.randomStringGenerator("ID_", 7, "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        String externalId = UUID.randomUUID().toString();
         int staffId = StaffHelper.createStaff(requestSpec, responseSpec);
         int[] groupMembers = generateGroupMembers(1, officeId);
         final String centerActivationDate = "01 July 2007";
@@ -258,9 +258,9 @@ public class LoanReschedulingWithinCenterTest {
                 LoanProductTestBuilder.RECALCULATION_FREQUENCY_TYPE_DAILY, "0", recalculationRestFrequencyDate,
                 LoanProductTestBuilder.INTEREST_APPLICABLE_STRATEGY_ON_PRE_CLOSE_DATE, null, isMultiTrancheLoan, null, null);
 
-        Calendar seondTrancheDate = Calendar.getInstance(Utils.getTimeZoneOfTenant());
-        seondTrancheDate.add(Calendar.MONTH, 1);
-        String secondDisbursement = dateFormat.format(seondTrancheDate.getTime());
+        Calendar secondTrancheDate = Calendar.getInstance(Utils.getTimeZoneOfTenant());
+        secondTrancheDate.add(Calendar.DAY_OF_MONTH, -7);
+        String secondDisbursement = dateFormat.format(secondTrancheDate.getTime());
 
         // CREATE TRANCHES
         List<HashMap> createTranches = new ArrayList<>();
@@ -298,11 +298,8 @@ public class LoanReschedulingWithinCenterTest {
         LoanStatusChecker.verifyLoanIsApproved(loanStatusHashMap);
         LoanStatusChecker.verifyLoanIsWaitingForDisbursal(loanStatusHashMap);
 
-        // DISBURSE A FIRST TRANCHE
-        String loanDetails = this.loanTransactionHelper.getLoanDetails(this.requestSpec, this.responseSpec, loanID);
-        this.loanTransactionHelper.disburseLoanWithNetDisbursalAmount(disbursementDate, loanID,
-                JsonPath.from(loanDetails).get("netDisbursalAmount").toString());
-        loanStatusHashMap = LoanStatusChecker.getStatusOfLoan(this.requestSpec, this.responseSpec, loanID);
+        // DISBURSE THE FIRST TRANCHE
+        this.loanTransactionHelper.disburseLoanWithNetDisbursalAmount(disbursementDate, loanID, "5000");
 
         LOG.info("---------------------------------CHANGING GROUP MEETING DATE ------------------------------------------");
         Calendar todaysdate = Calendar.getInstance(Utils.getTimeZoneOfTenant());
@@ -321,6 +318,9 @@ public class LoanReschedulingWithinCenterTest {
         // VERIFY THE INTEREST
         Float interestDue = (Float) ((HashMap) loanRepaymnetSchedule.get(2)).get("interestDue");
         assertEquals("41.05", String.valueOf(interestDue));
+
+        // DISBURSE THE SECOND TRANCHE (for let the loan test lifecycle callback to close the loan
+        this.loanTransactionHelper.disburseLoanWithNetDisbursalAmount(secondDisbursement, loanID, "5000");
     }
 
     private Integer createLoanProductWithInterestRecalculation(final String repaymentStrategy,
@@ -420,8 +420,8 @@ public class LoanReschedulingWithinCenterTest {
         for (int i = 0; i < groupMembers.length; i++) {
             final HashMap<String, String> map = new HashMap<>();
             map.put("officeId", "" + officeId);
-            map.put("name", Utils.randomStringGenerator("Group_Name_", 5));
-            map.put("externalId", Utils.randomStringGenerator("ID_", 7, "ABCDEFGHIJKLMNOPQRSTUVWXYZ"));
+            map.put("name", Utils.uniqueRandomStringGenerator("Group_Name_", 5));
+            map.put("externalId", UUID.randomUUID().toString());
             map.put("dateFormat", "dd MMMM yyyy");
             map.put("locale", "en");
             map.put("active", "true");
