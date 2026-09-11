@@ -18,13 +18,13 @@
  */
 package org.apache.fineract.infrastructure.creditbureau.domain;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.JoinColumn;
-import javax.persistence.ManyToOne;
-import javax.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -39,7 +39,7 @@ import org.apache.fineract.infrastructure.core.domain.AbstractPersistableCustom;
 @Setter
 @NoArgsConstructor
 @Accessors(chain = true)
-public class CreditBureauConfiguration extends AbstractPersistableCustom {
+public class CreditBureauConfiguration extends AbstractPersistableCustom<Long> {
 
     @Column(name = "configkey")
     private String configurationKey;
@@ -68,7 +68,7 @@ public class CreditBureauConfiguration extends AbstractPersistableCustom {
 
         final Map<String, Object> actualChanges = new LinkedHashMap<>(1);
 
-        final String configurationKey = "configurationKey";
+        final String configurationKey = "configkey";
 
         if (command.isChangeInStringParameterNamed(configurationKey, this.configurationKey)) {
             final String newValue = command.stringValueOfParameterNamed(configurationKey);

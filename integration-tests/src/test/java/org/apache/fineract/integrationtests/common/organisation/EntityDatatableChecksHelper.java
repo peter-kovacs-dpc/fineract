@@ -18,54 +18,33 @@
  */
 package org.apache.fineract.integrationtests.common.organisation;
 
-import com.google.gson.Gson;
-import io.restassured.specification.RequestSpecification;
-import io.restassured.specification.ResponseSpecification;
-import java.util.HashMap;
-import org.apache.fineract.integrationtests.common.Utils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import static org.apache.fineract.client.feign.util.FeignCalls.ok;
 
-public class EntityDatatableChecksHelper {
+import java.util.List;
+import org.apache.fineract.client.models.DeleteEntityDatatableChecksTemplateResponse;
+import org.apache.fineract.client.models.GetEntityDatatableChecksResponse;
+import org.apache.fineract.client.models.PostEntityDatatableChecksTemplateRequest;
+import org.apache.fineract.client.models.PostEntityDatatableChecksTemplateResponse;
+import org.apache.fineract.integrationtests.common.FineractFeignClientHelper;
 
-    private static final Logger LOG = LoggerFactory.getLogger(EntityDatatableChecksHelper.class);
-    private final RequestSpecification requestSpec;
-    private final ResponseSpecification responseSpec;
+public final class EntityDatatableChecksHelper {
 
-    private static final String DATATABLE_CHECK_URL = "/fineract-provider/api/v1/entityDatatableChecks";
+    private EntityDatatableChecksHelper() {}
 
-    public EntityDatatableChecksHelper(final RequestSpecification requestSpec, final ResponseSpecification responseSpec) {
-        this.requestSpec = requestSpec;
-        this.responseSpec = responseSpec;
+    public static PostEntityDatatableChecksTemplateResponse createEntityDatatableCheck(final String apptableName,
+            final String datatableName, final Long status, final Long productId) {
+        PostEntityDatatableChecksTemplateRequest request = new PostEntityDatatableChecksTemplateRequest().entity(apptableName)
+                .datatableName(datatableName).status(status).productId(productId);
+        return ok(() -> FineractFeignClientHelper.getFineractFeignClient().entityDataTable().createEntityDatatableCheck(request));
     }
 
-    public Integer createEntityDatatableCheck(final String apptableName, final String datatableName, final int status,
-            final Integer productId) {
-        return Utils.performServerPost(this.requestSpec, this.responseSpec, DATATABLE_CHECK_URL + "?" + Utils.TENANT_IDENTIFIER,
-                getTestEdcAsJSON(apptableName, datatableName, status, productId), "resourceId");
+    public static DeleteEntityDatatableChecksTemplateResponse deleteEntityDatatableCheck(final Long entityDatatableCheckId) {
+        return ok(() -> FineractFeignClientHelper.getFineractFeignClient().entityDataTable()
+                .deleteEntityDatatableCheck(entityDatatableCheckId));
     }
 
-    public Integer deleteEntityDatatableCheck(final Integer entityDatatableCheckId) {
-        return Utils.performServerDelete(requestSpec, responseSpec,
-                DATATABLE_CHECK_URL + "/" + entityDatatableCheckId + "?" + Utils.TENANT_IDENTIFIER, "resourceId");
+    public static List<GetEntityDatatableChecksResponse> retrieveEntityDatatableCheck() {
+        return ok(() -> FineractFeignClientHelper.getFineractFeignClient().entityDataTable().retrieveAllEntityDatatableChecks(null, null,
+                null, null, null)).getPageItems();
     }
-
-    public String retrieveEntityDatatableCheck() {
-        return Utils.performServerGet(requestSpec, responseSpec, DATATABLE_CHECK_URL + "?" + Utils.TENANT_IDENTIFIER, null);
-    }
-
-    public static String getTestEdcAsJSON(final String apptableName, final String datatableName, final int status,
-            final Integer productId) {
-        final HashMap<String, Object> map = new HashMap<>();
-        map.put("entity", apptableName);
-        map.put("status", status);
-        map.put("datatableName", datatableName);
-        if (productId != null) {
-            map.put("productId", productId);
-        }
-        String requestJsonString = new Gson().toJson(map);
-        LOG.info("map : {}", requestJsonString);
-        return requestJsonString;
-    }
-
 }

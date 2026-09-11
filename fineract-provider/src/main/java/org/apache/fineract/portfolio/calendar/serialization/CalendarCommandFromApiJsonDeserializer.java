@@ -50,7 +50,7 @@ public class CalendarCommandFromApiJsonDeserializer extends AbstractFromApiJsonD
     /**
      * The parameters supported for this command.
      */
-    private final Set<String> supportedParameters = CalendarSupportedParameters.getAllValues();
+    private static final Set<String> SUPPORTED_PARAMETERS = CalendarSupportedParameters.getAllValues();
 
     private final FromJsonHelper fromApiJsonHelper;
 
@@ -66,7 +66,7 @@ public class CalendarCommandFromApiJsonDeserializer extends AbstractFromApiJsonD
         }
 
         final Type typeOfMap = new TypeToken<Map<String, Object>>() {}.getType();
-        this.fromApiJsonHelper.checkForUnsupportedParameters(typeOfMap, json, this.supportedParameters);
+        this.fromApiJsonHelper.checkForUnsupportedParameters(typeOfMap, json, SUPPORTED_PARAMETERS);
 
         final JsonElement element = this.fromApiJsonHelper.parse(json);
         final String title = this.fromApiJsonHelper.extractStringNamed(CalendarSupportedParameters.TITLE.getValue(), element);
@@ -81,7 +81,7 @@ public class CalendarCommandFromApiJsonDeserializer extends AbstractFromApiJsonD
                 element);
         final Integer typeId = this.fromApiJsonHelper.extractIntegerSansLocaleNamed(CalendarSupportedParameters.TYPE_ID.getValue(),
                 element);
-        final boolean repeating = this.fromApiJsonHelper.extractBooleanNamed(CalendarSupportedParameters.REPEATING.getValue(), element);
+        final Boolean repeating = this.fromApiJsonHelper.extractBooleanNamed(CalendarSupportedParameters.REPEATING.getValue(), element);
         final Integer remindById = this.fromApiJsonHelper.extractIntegerSansLocaleNamed(CalendarSupportedParameters.REMIND_BY_ID.getValue(),
                 element);
         final Integer firstReminder = this.fromApiJsonHelper
@@ -100,7 +100,7 @@ public class CalendarCommandFromApiJsonDeserializer extends AbstractFromApiJsonD
         }
 
         final Type typeOfMap = new TypeToken<Map<String, Object>>() {}.getType();
-        this.fromApiJsonHelper.checkForUnsupportedParameters(typeOfMap, json, this.supportedParameters);
+        this.fromApiJsonHelper.checkForUnsupportedParameters(typeOfMap, json, SUPPORTED_PARAMETERS);
         final JsonElement element = this.fromApiJsonHelper.parse(json);
 
         final List<ApiParameterError> dataValidationErrors = new ArrayList<>();
@@ -153,11 +153,10 @@ public class CalendarCommandFromApiJsonDeserializer extends AbstractFromApiJsonD
                 .inMinMaxRange(CalendarEntityType.getMinValue(), CalendarEntityType.getMaxValue());
 
         if (this.fromApiJsonHelper.parameterExists(CalendarSupportedParameters.REPEATING.getValue(), element)) {
-            // FIXME - Throws NullPointerException when boolean value is null
-            final boolean repeating = this.fromApiJsonHelper.extractBooleanNamed(CalendarSupportedParameters.REPEATING.getValue(), element);
+            final Boolean repeating = this.fromApiJsonHelper.extractBooleanNamed(CalendarSupportedParameters.REPEATING.getValue(), element);
             baseDataValidator.reset().parameter(CalendarSupportedParameters.REPEATING.getValue()).value(repeating).notNull();
 
-            if (repeating) {
+            if (Boolean.TRUE.equals(repeating)) {
                 final Integer frequency = this.fromApiJsonHelper
                         .extractIntegerSansLocaleNamed(CalendarSupportedParameters.FREQUENCY.getValue(), element);
                 baseDataValidator.reset().parameter(CalendarSupportedParameters.FREQUENCY.getValue()).value(frequency).notBlank()
@@ -221,7 +220,7 @@ public class CalendarCommandFromApiJsonDeserializer extends AbstractFromApiJsonD
         }
 
         final Type typeOfMap = new TypeToken<Map<String, Object>>() {}.getType();
-        this.fromApiJsonHelper.checkForUnsupportedParameters(typeOfMap, json, this.supportedParameters);
+        this.fromApiJsonHelper.checkForUnsupportedParameters(typeOfMap, json, SUPPORTED_PARAMETERS);
         final JsonElement element = this.fromApiJsonHelper.parse(json);
 
         final List<ApiParameterError> dataValidationErrors = new ArrayList<>();
@@ -295,11 +294,10 @@ public class CalendarCommandFromApiJsonDeserializer extends AbstractFromApiJsonD
                     .inMinMaxRange(CalendarEntityType.getMinValue(), CalendarEntityType.getMaxValue());
         }
         if (this.fromApiJsonHelper.parameterExists(CalendarSupportedParameters.REPEATING.getValue(), element)) {
-            // FIXME - Throws NullPointerException when boolean value is null
-            final boolean repeating = this.fromApiJsonHelper.extractBooleanNamed(CalendarSupportedParameters.REPEATING.getValue(), element);
+            final Boolean repeating = this.fromApiJsonHelper.extractBooleanNamed(CalendarSupportedParameters.REPEATING.getValue(), element);
             baseDataValidator.reset().parameter(CalendarSupportedParameters.REPEATING.getValue()).value(repeating).notNull();
 
-            if (repeating) {
+            if (Boolean.TRUE.equals(repeating)) {
                 final Integer frequency = this.fromApiJsonHelper
                         .extractIntegerSansLocaleNamed(CalendarSupportedParameters.FREQUENCY.getValue(), element);
                 baseDataValidator.reset().parameter(CalendarSupportedParameters.FREQUENCY.getValue()).value(frequency).notBlank()

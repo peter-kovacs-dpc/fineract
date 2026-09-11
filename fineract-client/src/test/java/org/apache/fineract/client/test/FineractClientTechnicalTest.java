@@ -21,7 +21,6 @@ package org.apache.fineract.client.test;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.apache.fineract.client.util.FineractClient;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -29,13 +28,13 @@ import org.junit.jupiter.api.Test;
  *
  * @author Michael Vorburger.ch
  */
+
 public class FineractClientTechnicalTest {
 
     @Test
-    @Disabled // TODO remove Ignore once https://issues.apache.org/jira/browse/FINERACT-1221 is fixed
     void testInvalidOperations() {
         FineractClient.Builder builder = FineractClient.builder().baseURL("http://test/").tenant("default").basicAuth("mifos", "password");
-        builder.getRetrofitBuilder().validateEagerly(true); // see FINERACT-1221
+        builder.getRetrofitBuilder().validateEagerly(true);
         builder.build();
     }
 

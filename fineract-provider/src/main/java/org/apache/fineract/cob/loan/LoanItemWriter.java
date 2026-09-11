@@ -18,28 +18,17 @@
  */
 package org.apache.fineract.cob.loan;
 
-import java.util.List;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.fineract.cob.domain.LoanAccountLockRepository;
 import org.apache.fineract.cob.domain.LockOwner;
-import org.apache.fineract.infrastructure.core.domain.AbstractPersistableCustom;
-import org.apache.fineract.portfolio.loanaccount.domain.Loan;
-import org.jetbrains.annotations.NotNull;
-import org.springframework.batch.item.data.RepositoryItemWriter;
+import org.apache.fineract.cob.domain.LockingService;
 
-@Slf4j
-@RequiredArgsConstructor
-public class LoanItemWriter extends RepositoryItemWriter<Loan> {
+public class LoanItemWriter extends AbstractLoanItemWriter {
 
-    private final LoanAccountLockRepository accountLockRepository;
-
-    @Override
-    public void write(@NotNull List<? extends Loan> items) throws Exception {
-        super.write(items);
-        List<Long> loanIds = items.stream().map(AbstractPersistableCustom::getId).toList();
-
-        accountLockRepository.deleteByLoanIdInAndLockOwner(loanIds, LockOwner.LOAN_COB_CHUNK_PROCESSING);
+    public LoanItemWriter(LockingService loanLockingService) {
+        super(loanLockingService);
     }
 
+    @Override
+    protected LockOwner getLockOwner() {
+        return LockOwner.LOAN_COB_CHUNK_PROCESSING;
+    }
 }

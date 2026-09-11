@@ -18,230 +18,195 @@
  */
 package org.apache.fineract.template.api;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import java.io.IOException;
-import java.net.MalformedURLException;
-import java.util.ArrayList;
-import java.util.Arrays;
+import jakarta.validation.Valid;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.DefaultValue;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MultivaluedMap;
+import jakarta.ws.rs.core.UriInfo;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.DefaultValue;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.PUT;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.UriInfo;
-import org.apache.fineract.commands.domain.CommandWrapper;
-import org.apache.fineract.commands.service.CommandWrapperBuilder;
-import org.apache.fineract.commands.service.PortfolioCommandSourceWritePlatformService;
-import org.apache.fineract.infrastructure.core.api.ApiRequestParameterHelper;
-import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
-import org.apache.fineract.infrastructure.core.serialization.ApiRequestJsonSerializationSettings;
-import org.apache.fineract.infrastructure.core.serialization.DefaultToApiJsonSerializer;
-import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
+import lombok.RequiredArgsConstructor;
+import org.apache.fineract.command.core.CommandDispatcher;
+import org.apache.fineract.infrastructure.core.annotation.AlternativeOperationId;
+import org.apache.fineract.template.command.TemplateCreateCommand;
+import org.apache.fineract.template.command.TemplateDeleteCommand;
+import org.apache.fineract.template.command.TemplateUpdateCommand;
+import org.apache.fineract.template.data.TemplateCreateRequest;
+import org.apache.fineract.template.data.TemplateCreateResponse;
 import org.apache.fineract.template.data.TemplateData;
-import org.apache.fineract.template.domain.Template;
+import org.apache.fineract.template.data.TemplateDeleteRequest;
+import org.apache.fineract.template.data.TemplateDeleteResponse;
+import org.apache.fineract.template.data.TemplateDetailsData;
+import org.apache.fineract.template.data.TemplateItemData;
+import org.apache.fineract.template.data.TemplateUpdateRequest;
+import org.apache.fineract.template.data.TemplateUpdateResponse;
 import org.apache.fineract.template.domain.TemplateEntity;
 import org.apache.fineract.template.domain.TemplateType;
 import org.apache.fineract.template.service.TemplateDomainService;
-import org.apache.fineract.template.service.TemplateMergeService;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Scope;
+import org.apache.fineract.template.service.TemplateMergeServiceImpl;
 import org.springframework.stereotype.Component;
 
-@Path("/templates")
+@Path("/v1/templates")
 @Consumes({ MediaType.APPLICATION_JSON })
 @Produces({ MediaType.APPLICATION_JSON })
 @Component
-@Scope("singleton")
-
-@Tag(name = "User Generated Documents", description = "User Generated Documents(alternatively, Templates) are used for end-user features such as custom user defined document generation (AKA UGD). They are based on {{ moustache }} templates. Think of them as a sort of built-in \"mail merge\" functionality.\n"
-        + "\n"
-        + "User Generated Documents (and other types of templates) can aggregate data from several Apache Fineract back-end API calls via mappers. Mappers can even access non-Apache Fineract REST services from other servers. UGDs can render such data in tables, show images, etc. TBD: Please have a look at some of the Example UGDs included in Apache Fineract (or the Wiki page, for now.).\n"
-        + "\n"
-        + "UGDs can be assigned to an entity like client or loan and be of a type like Document or SMS. The entity and type of a UGD is only there for the convenience of user agents (UIs), in order to know where to show UGDs for the user (i.e. which tab). The Template Engine back-end runner does not actually need this metadata.")
+@Tag(name = "templates", description = """
+        User Generated Documents(alternatively, Templates) are used for end-user features such as custom user defined document generation (AKA UGD). They are based on {{ moustache }} templates. Think of them as a sort of built-in 'mail merge' functionality
+        User Generated Documents (and other types of templates) can aggregate data from several Apache Fineract back-end API calls via mappers. Mappers can even access non-Apache Fineract REST services from other servers. UGDs can render such data in tables, show images, etc. TBD: Please have a look at some of the Example UGDs included in Apache Fineract (or the Wiki page, for now.).
+        UGDs can be assigned to an entity like client or loan and be of a type like Document or SMS. The entity and type of a UGD is only there for the convenience of user agents (UIs), in order to know where to show UGDs for the user (i.e. which tab). The Template Engine back-end runner does not actually need this metadata.""")
+@RequiredArgsConstructor
 public class TemplatesApiResource {
 
-    private final Set<String> responseTemplatesDataParameters = new HashSet<>(Arrays.asList("id"));
-    private final Set<String> responseTemplateDataParameters = new HashSet<>(Arrays.asList("id", "entities", "types", "template"));
-    private final String resourceNameForPermission = "template";
+    public static final String ID = "id";
+    public static final String PARAM_TEMPLATE = "template";
 
-    private final PlatformSecurityContext context;
-    private final DefaultToApiJsonSerializer<Template> toApiJsonSerializer;
-    private final DefaultToApiJsonSerializer<TemplateData> templateDataApiJsonSerializer;
-    private final ApiRequestParameterHelper apiRequestParameterHelper;
     private final TemplateDomainService templateService;
-    private final TemplateMergeService templateMergeService;
-    private final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService;
-
-    @Autowired
-    public TemplatesApiResource(final PlatformSecurityContext context, final DefaultToApiJsonSerializer<Template> toApiJsonSerializer,
-            final DefaultToApiJsonSerializer<TemplateData> templateDataApiJsonSerializer,
-            final ApiRequestParameterHelper apiRequestParameterHelper, final TemplateDomainService templateService,
-            final TemplateMergeService templateMergeService,
-            final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService) {
-
-        this.context = context;
-        this.toApiJsonSerializer = toApiJsonSerializer;
-        this.templateDataApiJsonSerializer = templateDataApiJsonSerializer;
-        this.apiRequestParameterHelper = apiRequestParameterHelper;
-        this.templateService = templateService;
-        this.templateMergeService = templateMergeService;
-        this.commandsSourceWritePlatformService = commandsSourceWritePlatformService;
-    }
+    private final TemplateMergeServiceImpl templateMergeService;
+    private final CommandDispatcher dispatcher;
 
     @GET
-    @Operation(summary = "Retrieve all UGDs", description = "Example Requests:\n" + "\n" + "templates\n" + "\n"
-            + "It is also possible to get specific UGDs by entity and type:\n" + "\n" + "templates?type=0&entity=0\n"
-            + "[Entity: Id]\n\n\n\n" + "\n\n" + "client: 0, loan: 1" + "\n\n" + "[Type: Id]\n\n\n\n"
-            + "Document: 0, E-Mail (not yet): 1,  SMS: 2")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = TemplatesApiResourcesSwagger.GetTemplatesResponse.class))) })
-    public String retrieveAll(@DefaultValue("-1") @QueryParam("typeId") @Parameter(description = "typeId") final int typeId,
-            @DefaultValue("-1") @QueryParam("entityId") @Parameter(description = "entityId") final int entityId,
-            @Context final UriInfo uriInfo) {
+    @Operation(operationId = "retrieveAllTemplates", summary = "Retrieve all UGDs", description = """
+            It is possible to get specific UGDs by entity and type:
 
-        this.context.authenticatedUser().validateHasReadPermission(this.resourceNameForPermission);
+            templates?type=0&entity=0
 
-        // FIXME - we dont use the ORM when doing fetches - we write SQL and
-        // fetch through JDBC returning data to be serialized to JSON
-        List<Template> templates = new ArrayList<>();
+            Entity ID:
 
+            - client: 0
+            - loan: 1
+
+            Type ID:
+
+            - Document: 0
+            - E-Mail (not yet): 1
+            - SMS: 2""")
+    @AlternativeOperationId("retrieveAll_40")
+    public List<TemplateData> retrieveAllTemplates(
+            @DefaultValue("-1") @QueryParam("typeId") @Parameter(description = "typeId") final int typeId,
+            @DefaultValue("-1") @QueryParam("entityId") @Parameter(description = "entityId") final int entityId) {
         if (typeId != -1 && entityId != -1) {
-            templates = this.templateService.getAllByEntityAndType(TemplateEntity.values()[entityId], TemplateType.values()[typeId]);
+            return templateService.getAllByEntityAndType(findTemplateEntity(entityId), findTemplateType(typeId));
         } else {
-            templates = this.templateService.getAll();
+            return templateService.getAll();
         }
-
-        final ApiRequestJsonSerializationSettings settings = this.apiRequestParameterHelper.process(uriInfo.getQueryParameters());
-        return this.toApiJsonSerializer.serialize(settings, templates, this.responseTemplatesDataParameters);
     }
 
     @GET
-    @Path("template")
-    @Operation(summary = "Retrieve UGD Details Template", description = "This is a convenience resource. It can be useful when building maintenance user interface screens for UGDs. The UGD data returned consists of any or all of:\n"
-            + "\n" + "ARGUMENTS\n" + "name String entity String type String text String optional mappers Mapper optional\n"
-            + "Example Request:\n" + "\n" + "templates/template")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = TemplatesApiResourcesSwagger.GetTemplatesTemplateResponse.class))) })
-    public String template(@Context final UriInfo uriInfo) {
+    @Path(PARAM_TEMPLATE)
+    @Operation(operationId = "retrieveTemplateDetails", summary = "Retrieve UGD Details Template", description = """
+            This is a convenience resource. It can be useful when building maintenance user interface screens for UGDs. The UGD data returned consists of any or all of:
 
-        this.context.authenticatedUser().validateHasReadPermission(this.resourceNameForPermission);
+            - name
+            - entity
+            - type
+            - text
+            - mappers
 
-        final TemplateData templateData = TemplateData.template();
+            Example Request:
 
-        final ApiRequestJsonSerializationSettings settings = this.apiRequestParameterHelper.process(uriInfo.getQueryParameters());
-        return this.templateDataApiJsonSerializer.serialize(settings, templateData, this.responseTemplatesDataParameters);
-    }
-
-    @POST
-    @Operation(summary = "Add a UGD", description = "Adds a new UGD.\n" + "\n" + "Mandatory Fields\n" + "name\n\n\n\n"
-            + "Example Requests:\n" + "\n" + "templates/1")
-    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TemplatesApiResourcesSwagger.PostTemplatesRequest.class)))
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = TemplatesApiResourcesSwagger.PostTemplatesResponse.class))) })
-    public String createTemplate(@Parameter(hidden = true) final String apiRequestBodyAsJson) {
-        final CommandWrapper commandRequest = new CommandWrapperBuilder().createTemplate().withJson(apiRequestBodyAsJson).build();
-
-        final CommandProcessingResult result = this.commandsSourceWritePlatformService.logCommandSource(commandRequest);
-
-        return this.toApiJsonSerializer.serialize(result);
+            templates/template
+            """, responses = @ApiResponse(responseCode = "default", content = @Content(schema = @Schema(implementation = TemplateData.class))))
+    @AlternativeOperationId("template_20")
+    public TemplateDetailsData retrieveTemplateDetails() {
+        return templateDetails(null);
     }
 
     @GET
     @Path("{templateId}")
-    @Operation(summary = "Retrieve a UGD", description = "Example Requests:\n" + "\n" + "templates/1")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = TemplatesApiResourcesSwagger.GetTemplatesTemplateIdResponse.class))) })
-    public String retrieveOne(@PathParam("templateId") @Parameter(description = "templateId") final Long templateId,
-            @Context final UriInfo uriInfo) {
+    @Operation(operationId = "retrieveOneTemplate", summary = "Retrieve a UGD", description = """
+            Example Requests:
 
-        this.context.authenticatedUser().validateHasReadPermission(this.resourceNameForPermission);
-
-        final Template template = this.templateService.findOneById(templateId);
-
-        final ApiRequestJsonSerializationSettings settings = this.apiRequestParameterHelper.process(uriInfo.getQueryParameters());
-        return this.toApiJsonSerializer.serialize(settings, template, this.responseTemplatesDataParameters);
+            - templates/1""")
+    @AlternativeOperationId("retrieveOne_30")
+    public TemplateData retrieveOneTemplate(@PathParam("templateId") @Parameter(description = "templateId") final Long templateId) {
+        return templateService.findOneById(templateId);
     }
 
     @GET
     @Path("{templateId}/template")
-    public String getTemplateByTemplate(@PathParam("templateId") final Long templateId, @Context final UriInfo uriInfo) {
+    @Operation(operationId = "retrieveTemplateById", responses = @ApiResponse(responseCode = "default", content = @Content(schema = @Schema(implementation = TemplateData.class))))
+    @AlternativeOperationId("getTemplateByTemplate")
+    public TemplateDetailsData retrieveTemplateById(@PathParam("templateId") final Long templateId) {
+        return templateDetails(templateService.findOneById(templateId));
+    }
 
-        this.context.authenticatedUser().validateHasReadPermission(this.resourceNameForPermission);
+    @POST
+    @Operation(summary = "Add a UGD", description = """
+            Adds a new UGD.
 
-        final TemplateData template = TemplateData.template(this.templateService.findOneById(templateId));
+            Mandatory Fields:
+            - name
 
-        final ApiRequestJsonSerializationSettings settings = this.apiRequestParameterHelper.process(uriInfo.getQueryParameters());
-        return this.templateDataApiJsonSerializer.serialize(settings, template, this.responseTemplateDataParameters);
+            Example Requests:
+
+            - templates/1""")
+    public TemplateCreateResponse createTemplate(@RequestBody(required = true) @Valid final TemplateCreateRequest request) {
+        final var command = new TemplateCreateCommand();
+        command.setPayload(request);
+
+        final Supplier<TemplateCreateResponse> response = dispatcher.dispatch(command);
+
+        return response.get();
     }
 
     @PUT
     @Path("{templateId}")
     @Operation(summary = "Update a UGD", description = "")
-    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TemplatesApiResourcesSwagger.PutTemplatesTemplateIdRequest.class)))
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = TemplatesApiResourcesSwagger.PutTemplatesTemplateIdResponse.class))) })
-    public String saveTemplate(@PathParam("templateId") @Parameter(description = "templateId") final Long templateId,
-            @Parameter(hidden = true) final String apiRequestBodyAsJson) {
+    public TemplateUpdateResponse saveTemplate(@PathParam("templateId") @Parameter(description = "templateId") final Long templateId,
+            @RequestBody(required = true) @Valid final TemplateUpdateRequest request) {
+        final var command = new TemplateUpdateCommand();
+        command.setPayload(request);
 
-        final CommandWrapper commandRequest = new CommandWrapperBuilder().updateTemplate(templateId).withJson(apiRequestBodyAsJson).build();
+        final Supplier<TemplateUpdateResponse> response = dispatcher.dispatch(command);
 
-        final CommandProcessingResult result = this.commandsSourceWritePlatformService.logCommandSource(commandRequest);
-
-        return this.toApiJsonSerializer.serialize(result);
+        return response.get();
     }
 
     @DELETE
     @Path("{templateId}")
     @Operation(summary = "Delete a UGD", description = "")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = TemplatesApiResourcesSwagger.DeleteTemplatesTemplateIdResponse.class))) })
-    public String deleteTemplate(@PathParam("templateId") @Parameter(description = "templateId") final Long templateId) {
+    public TemplateDeleteResponse deleteTemplate(@PathParam("templateId") @Parameter(description = "templateId") final Long templateId) {
+        final var command = new TemplateDeleteCommand();
+        command.setPayload(TemplateDeleteRequest.builder().id(templateId).build());
 
-        final CommandWrapper commandRequest = new CommandWrapperBuilder().deleteTemplate(templateId).build();
+        final Supplier<TemplateDeleteResponse> response = dispatcher.dispatch(command);
 
-        final CommandProcessingResult result = this.commandsSourceWritePlatformService.logCommandSource(commandRequest);
-
-        return this.toApiJsonSerializer.serialize(result);
+        return response.get();
     }
 
     @POST
     @Path("{templateId}")
     @Produces({ MediaType.TEXT_HTML })
-    public String mergeTemplate(@PathParam("templateId") final Long templateId, @Context final UriInfo uriInfo,
-            final String apiRequestBodyAsJson) throws MalformedURLException, IOException {
+    public String mergeTemplate(@PathParam("templateId") @Parameter(description = "templateId") final Long templateId,
+            @Context final UriInfo uriInfo, @RequestBody(required = true) final Map<String, Object> result) {
 
-        final Template template = this.templateService.findOneById(templateId);
-
-        @SuppressWarnings("unchecked")
-        final HashMap<String, Object> result = new ObjectMapper().readValue(apiRequestBodyAsJson, HashMap.class);
+        var template = templateService.findOneById(templateId);
 
         final MultivaluedMap<String, String> parameters = uriInfo.getQueryParameters();
         final Map<String, Object> parametersMap = new HashMap<>();
         for (final Map.Entry<String, List<String>> entry : parameters.entrySet()) {
-
             if (entry.getValue().size() == 1) {
-                parametersMap.put(entry.getKey(), entry.getValue().get(0));
+                parametersMap.put(entry.getKey(), entry.getValue().getFirst());
             } else {
                 parametersMap.put(entry.getKey(), entry.getValue());
             }
@@ -249,6 +214,31 @@ public class TemplatesApiResource {
 
         parametersMap.put("BASE_URI", uriInfo.getBaseUri());
         parametersMap.putAll(result);
+
         return this.templateMergeService.compile(template, parametersMap);
+    }
+
+    private TemplateDetailsData templateDetails(final TemplateData template) {
+        return TemplateDetailsData.builder().entities(retrieveEntities()).types(retrieveTypes()).template(template).build();
+    }
+
+    private List<TemplateItemData> retrieveEntities() {
+        return Stream.of(TemplateEntity.values())
+                .map(entity -> TemplateItemData.builder().id(entity.getId()).name(entity.getName()).build()).toList();
+    }
+
+    private List<TemplateItemData> retrieveTypes() {
+        return Stream.of(TemplateType.values()).map(type -> TemplateItemData.builder().id(type.getId()).name(type.getName()).build())
+                .toList();
+    }
+
+    private TemplateEntity findTemplateEntity(final int entityId) {
+        return Stream.of(TemplateEntity.values()).filter(entity -> entity.getId() == entityId).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Invalid template entity id: " + entityId));
+    }
+
+    private TemplateType findTemplateType(final int typeId) {
+        return Stream.of(TemplateType.values()).filter(type -> type.getId() == typeId).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Invalid template type id: " + typeId));
     }
 }

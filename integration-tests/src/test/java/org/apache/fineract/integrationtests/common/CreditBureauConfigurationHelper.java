@@ -19,84 +19,77 @@
 package org.apache.fineract.integrationtests.common;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import io.restassured.specification.RequestSpecification;
-import io.restassured.specification.ResponseSpecification;
 import java.util.HashMap;
+import org.apache.fineract.client.services.CreditBureauConfigurationApi;
+import org.apache.fineract.client.util.Calls;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class CreditBureauConfigurationHelper {
+public final class CreditBureauConfigurationHelper {
 
-    private static final String CREATE_CREDITBUREAUCONFIGURATION_URL = "/fineract-provider/api/v1/CreditBureauConfiguration/configuration?"
-            + Utils.TENANT_IDENTIFIER;
     private static final Logger LOG = LoggerFactory.getLogger(CreditBureauConfigurationHelper.class);
-    private final RequestSpecification requestSpec;
-    private final ResponseSpecification responseSpec;
 
-    public CreditBureauConfigurationHelper(final RequestSpecification requestSpec, final ResponseSpecification responseSpec) {
-        this.requestSpec = requestSpec;
-        this.responseSpec = responseSpec;
+    private CreditBureauConfigurationHelper() {}
+
+    private static CreditBureauConfigurationApi api() {
+        return FineractClientHelper.getFineractClient().creditBureauConfiguration;
     }
 
-    public static Integer createCreditBureauConfiguration(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
-            String configKey) {
-        return createCreditBureauConfiguration(requestSpec, responseSpec, "1", configKey);
+    public static String getOrganisationCreditBureauConfiguration() {
+        LOG.info(
+                "---------------------------------GET ORGANISATION CREDIT BUREAU CONFIGURATION---------------------------------------------");
+        return Calls.ok(api().getOrganisationCreditBureau());
     }
 
-    public static Integer createCreditBureauConfiguration(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
-            final String creditBureauId, String configKey) {
-        LOG.info("---------------------------------CREATING A CREDIT_BUREAU_CONFIGURATION---------------------------------------------");
-        final String CREDITBUREAU_CONFIGURATION_URL = " /fineract-provider/api/v1/CreditBureauConfiguration/configuration/" + creditBureauId
-                + "?" + Utils.TENANT_IDENTIFIER;
-        return Utils.performServerPost(requestSpec, responseSpec, CREDITBUREAU_CONFIGURATION_URL,
-                creditBureauConfigurationAsJson(configKey, "testConfigKeyValue", "description"), "resourceId");
+    public static String getCreditBureauConfiguration(Long organisationCreditBureauId) {
+        LOG.info("---------------------------------GET CREDIT BUREAU CONFIGURATION---------------------------------------------");
+        return Calls.ok(api().getConfiguration(organisationCreditBureauId));
     }
 
-    /*
-     * public static Object updateCreditBureauConfiguration(final RequestSpecification requestSpec, final
-     * ResponseSpecification responseSpec, final Integer ConfigurationId) { return
-     * updateCreditBureauConfiguration(requestSpec, responseSpec, ConfigurationId); }
-     */
-
-    public static String updateCreditBureauConfiguration(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
-            final Integer ConfigurationId) {
-
-        Object configurationObject = updateCreditBureauConfiguration(requestSpec, responseSpec, ConfigurationId, "updateConfigKeyValue");
-        // Convert the Object to String and fetch updated value
-        Gson gson = new Gson();
-        String result = gson.toJson(configurationObject);
-        JsonObject reportObject = JsonParser.parseString(result).getAsJsonObject();
-        String value = reportObject.get("value").getAsString();
-
-        return value;
-    }
-
-    public static Object updateCreditBureauConfiguration(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
-            final Integer ConfigurationId, final String updateConfigKeyValue) {
-        LOG.info("---------------------------------UPDATING A CREDIT_BUREAU_CONFIGURATION---------------------------------------------");
-        final String CREDITBUREAU_CONFIGURATION_URL = " /fineract-provider/api/v1/CreditBureauConfiguration/configuration/"
-                + ConfigurationId + "?" + Utils.TENANT_IDENTIFIER;
-        return Utils.performServerPut(requestSpec, responseSpec, CREDITBUREAU_CONFIGURATION_URL,
-                updateCreditBureauConfigurationAsJson("updateConfigKeyValue", "description"), "changes");
-    }
-
-    public static String creditBureauConfigurationAsJson(final String configkey, final String value, final String description) {
+    public static String createCreditBureauConfiguration(Long creditBureauId, String configKey, String value, String description) {
+        LOG.info("---------------------------------CREATING A CREDIT BUREAU CONFIGURATION---------------------------------------------");
         final HashMap<String, String> map = new HashMap<>();
-        map.put("configkey", configkey);
+        map.put("configkey", configKey);
         map.put("value", value);
         map.put("description", description);
-        LOG.info("map :  {}", map);
-        return new Gson().toJson(map);
+        return Calls.ok(api().createCreditBureauConfiguration(creditBureauId, new Gson().toJson(map)));
     }
 
-    public static String updateCreditBureauConfigurationAsJson(final String value, final String description) {
+    public static String updateCreditBureauConfiguration(Long configurationId, String configKey, String value) {
+        LOG.info("---------------------------------UPDATING A CREDIT BUREAU CONFIGURATION---------------------------------------------");
         final HashMap<String, String> map = new HashMap<>();
+        if (configKey != null) {
+            map.put("configkey", configKey);
+        }
         map.put("value", value);
-        map.put("description", description);
-        LOG.info("map :  {}", map);
-        return new Gson().toJson(map);
+        return Calls.ok(api().updateCreditBureauConfiguration(configurationId, new Gson().toJson(map)));
     }
 
+    public static String addOrganisationCreditBureau(Long creditBureauId, String alias, boolean isActive) {
+        LOG.info("---------------------------------CREATING ORGANISATION CREDIT BUREAU---------------------------------------------");
+        final HashMap<String, Object> map = new HashMap<>();
+        map.put("alias", alias);
+        map.put("isActive", isActive);
+        return Calls.ok(api().addOrganisationCreditBureau(creditBureauId, new Gson().toJson(map)));
+    }
+
+    public static String updateOrganisationCreditBureau(String creditBureauId, boolean isActive) {
+        LOG.info("---------------------------------UPDATING ORGANISATION CREDIT BUREAU---------------------------------------------");
+        final HashMap<String, Object> map = new HashMap<>();
+        map.put("creditBureauId", creditBureauId);
+        map.put("isActive", isActive);
+        return Calls.ok(api().updateCreditBureau(new Gson().toJson(map)));
+    }
+
+    public static String createCreditBureauConfigurationRaw(Long creditBureauId, String jsonBody) {
+        return Calls.ok(api().createCreditBureauConfiguration(creditBureauId, jsonBody));
+    }
+
+    public static String addOrganisationCreditBureauRaw(Long creditBureauId, String jsonBody) {
+        return Calls.ok(api().addOrganisationCreditBureau(creditBureauId, jsonBody));
+    }
+
+    public static String createLoanProductMappingRaw(Long organisationCreditBureauId, String jsonBody) {
+        return Calls.ok(api().createCreditBureauLoanProductMapping(organisationCreditBureauId, jsonBody));
+    }
 }

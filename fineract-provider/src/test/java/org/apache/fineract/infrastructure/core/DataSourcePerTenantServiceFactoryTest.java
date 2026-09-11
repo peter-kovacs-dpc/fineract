@@ -29,16 +29,20 @@ import static org.mockito.Mockito.verify;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.SQLException;
+import java.util.Optional;
 import java.util.Properties;
 import javax.sql.DataSource;
 import org.apache.fineract.infrastructure.core.config.FineractProperties;
 import org.apache.fineract.infrastructure.core.domain.FineractPlatformTenant;
 import org.apache.fineract.infrastructure.core.domain.FineractPlatformTenantConnection;
-import org.apache.fineract.infrastructure.core.service.DataSourcePerTenantServiceFactory;
-import org.apache.fineract.infrastructure.core.service.HikariDataSourceFactory;
+import org.apache.fineract.infrastructure.core.service.database.DataSourcePerTenantServiceFactory;
+import org.apache.fineract.infrastructure.core.service.database.DatabasePasswordEncryptor;
+import org.apache.fineract.infrastructure.core.service.database.HikariDataSourceFactory;
+import org.apache.fineract.infrastructure.security.utils.EncryptionUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -49,37 +53,44 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.security.crypto.bcrypt.BCrypt;
 
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 public class DataSourcePerTenantServiceFactoryTest {
 
     public static final String MASTER_DB_SERVER = "localhost";
-    public static final String MASTER_DB_SERVER_PORT = "3306";
+    public static final String MASTER_DB_SERVER_PORT = "5432";
     public static final String MASTER_DB_SCHEMA_NAME = "fineract_tenants";
     public static final String MASTER_DB_USERNAME = "root";
     public static final String MASTER_DB_PASSWORD = "password";
     public static final String MASTER_DB_CONN_PARAMS = "something";
-    public static final String MASTER_DB_JDBC_URL = "jdbc:mariadb://" + MASTER_DB_SERVER + ":" + MASTER_DB_SERVER_PORT + "/"
+    public static final String MASTER_DB_JDBC_URL = "jdbc:postgresql://" + MASTER_DB_SERVER + ":" + MASTER_DB_SERVER_PORT + "/"
             + MASTER_DB_SCHEMA_NAME + "?" + MASTER_DB_CONN_PARAMS;
 
     public static final String READONLY_DB_SERVER = "localhost-readonly";
-    public static final String READONLY_DB_SERVER_PORT = "3306-readonly";
+    public static final String READONLY_DB_SERVER_PORT = "5432-readonly";
     public static final String READONLY_DB_SCHEMA_NAME = "fineract_tenants-readonly";
     public static final String READONLY_DB_USERNAME = "root-readonly";
     public static final String READONLY_DB_PASSWORD = "password-readonly";
     public static final String READONLY_DB_CONN_PARAMS = "something-readonly";
-    public static final String READONLY_DB_JDBC_URL = "jdbc:mariadb://" + READONLY_DB_SERVER + ":" + READONLY_DB_SERVER_PORT + "/"
+    public static final String READONLY_DB_JDBC_URL = "jdbc:postgresql://" + READONLY_DB_SERVER + ":" + READONLY_DB_SERVER_PORT + "/"
             + READONLY_DB_SCHEMA_NAME + "?" + READONLY_DB_CONN_PARAMS;
 
     public static final int MASTER_DB_INITIAL_SIZE = 1;
     public static final int MASTER_DB_MAX_ACTIVE = 5;
     public static final long MASTER_DB_VALIDATION_INTERVAL = 500L;
     public static final long MASTER_DB_INIT_FAIL_TIMEOUT = 0L;
+    public static final long MASTER_DB_LEAK_DETECTION_THRESHOLD = 20_000L;
 
-    public static final String MASTER_DB_DRIVER_CLASS_NAME = "org.mariadb.jdbc.Driver";
+    public static final String MASTER_DB_DRIVER_CLASS_NAME = "org.postgresql.Driver";
     public static final String MASTER_DB_CONN_TEST_QUERY = "SELECT 1";
     public static final boolean MASTER_DB_AUTO_COMMIT_ENABLED = true;
+
+    public static final String MASTER_MASTER_PASSWORD = "fineract";
+
+    public static final String MASTER_ENCRYPTION = "AES/CBC/PKCS5Padding";
+    public static final FineractPlatformTenant TENANT = new FineractPlatformTenant(1L, "", "", "", null);
 
     @Mock
     private FineractProperties fineractProperties;
@@ -102,6 +113,12 @@ public class DataSourcePerTenantServiceFactoryTest {
     @Captor
     private ArgumentCaptor<HikariConfig> hikariConfigCaptor;
 
+    @Mock
+    private DatabasePasswordEncryptor databasePasswordEncryptor;
+
+    @Mock
+    private Optional<MeterRegistry> meterRegistry;
+
     @InjectMocks
     private DataSourcePerTenantServiceFactory underTest;
 
@@ -113,21 +130,25 @@ public class DataSourcePerTenantServiceFactoryTest {
         DatabaseMetaData databaseMetaData = mock(DatabaseMetaData.class);
         given(connection.getMetaData()).willReturn(databaseMetaData);
 
-        given(databaseMetaData.getURL()).willReturn("jdbc:mariadb://localhost:3306/fineract_tenants");
+        given(databaseMetaData.getURL()).willReturn("jdbc:postgresql://localhost:5432/fineract_tenants");
 
         given(tenantConnection.getSchemaServer()).willReturn(MASTER_DB_SERVER);
         given(tenantConnection.getSchemaServerPort()).willReturn(MASTER_DB_SERVER_PORT);
         given(tenantConnection.getSchemaName()).willReturn(MASTER_DB_SCHEMA_NAME);
         given(tenantConnection.getSchemaUsername()).willReturn(MASTER_DB_USERNAME);
-        given(tenantConnection.getSchemaPassword()).willReturn(MASTER_DB_PASSWORD);
+        given(tenantConnection.getSchemaPassword())
+                .willReturn(EncryptionUtil.encryptToBase64(MASTER_ENCRYPTION, MASTER_MASTER_PASSWORD, MASTER_DB_PASSWORD));
         given(tenantConnection.getSchemaConnectionParameters()).willReturn(MASTER_DB_CONN_PARAMS);
 
         given(tenantConnection.getReadOnlySchemaServer()).willReturn(READONLY_DB_SERVER);
         given(tenantConnection.getReadOnlySchemaServerPort()).willReturn(READONLY_DB_SERVER_PORT);
         given(tenantConnection.getReadOnlySchemaName()).willReturn(READONLY_DB_SCHEMA_NAME);
         given(tenantConnection.getReadOnlySchemaUsername()).willReturn(READONLY_DB_USERNAME);
-        given(tenantConnection.getReadOnlySchemaPassword()).willReturn(READONLY_DB_PASSWORD);
+        given(tenantConnection.getReadOnlySchemaPassword())
+                .willReturn(EncryptionUtil.encryptToBase64(MASTER_ENCRYPTION, MASTER_MASTER_PASSWORD, READONLY_DB_PASSWORD));
         given(tenantConnection.getReadOnlySchemaConnectionParameters()).willReturn(READONLY_DB_CONN_PARAMS);
+        String hashedMasterPassword = BCrypt.hashpw("master-password", BCrypt.gensalt());
+        given(tenantConnection.getMasterPasswordHash()).willReturn(hashedMasterPassword);
 
         given(defaultTenant.getConnection()).willReturn(tenantConnection);
         given(tenantConnection.getInitialSize()).willReturn(MASTER_DB_INITIAL_SIZE);
@@ -139,8 +160,28 @@ public class DataSourcePerTenantServiceFactoryTest {
         given(tenantHikariConfig.getConnectionTestQuery()).willReturn(MASTER_DB_CONN_TEST_QUERY);
         given(tenantHikariConfig.getDataSourceProperties()).willReturn(mock(Properties.class));
         given(tenantHikariConfig.isAutoCommit()).willReturn(MASTER_DB_AUTO_COMMIT_ENABLED);
+        given(tenantHikariConfig.getLeakDetectionThreshold()).willReturn(0L);
 
         given(hikariDataSourceFactory.create(any())).willReturn(mock(HikariDataSource.class));
+
+        FineractProperties.FineractConfigProperties configProperties = new FineractProperties.FineractConfigProperties();
+        configProperties.setMinPoolSize(-1);
+        configProperties.setMaxPoolSize(-1);
+        configProperties.setLeakDetectionThreshold(0L);
+
+        FineractProperties.FineractTenantProperties tenantPropertiesMock = mock(FineractProperties.FineractTenantProperties.class);
+        given(tenantPropertiesMock.getEncryption()).willReturn(MASTER_ENCRYPTION);
+        given(tenantPropertiesMock.getMasterPassword()).willReturn(MASTER_MASTER_PASSWORD);
+
+        given(tenantPropertiesMock.getConfig()).willReturn(configProperties);
+        given(fineractProperties.getTenant()).willReturn(tenantPropertiesMock);
+
+        given(databasePasswordEncryptor.isMasterPasswordHashValid(any())).willReturn(true);
+        given(databasePasswordEncryptor.getMasterPasswordHash()).willReturn(hashedMasterPassword);
+        given(databasePasswordEncryptor.decrypt(any())).will(
+                answer -> EncryptionUtil.decryptFromBase64(MASTER_ENCRYPTION, MASTER_MASTER_PASSWORD, answer.getArgument(0, String.class)));
+        given(databasePasswordEncryptor.encrypt(any())).will(
+                answer -> EncryptionUtil.encryptToBase64(MASTER_ENCRYPTION, MASTER_MASTER_PASSWORD, answer.getArgument(0, String.class)));
     }
 
     @Test
@@ -151,7 +192,7 @@ public class DataSourcePerTenantServiceFactoryTest {
         given(fineractProperties.getMode()).willReturn(modeProperties);
 
         // when
-        DataSource dataSource = underTest.createNewDataSourceFor(defaultTenant.getConnection());
+        DataSource dataSource = underTest.createNewDataSourceFor(TENANT, defaultTenant.getConnection());
 
         // then
         assertNotNull(dataSource);
@@ -168,6 +209,143 @@ public class DataSourcePerTenantServiceFactoryTest {
         assertEquals(MASTER_DB_DRIVER_CLASS_NAME, hikariConfig.getDriverClassName());
         assertEquals(MASTER_DB_CONN_TEST_QUERY, hikariConfig.getConnectionTestQuery());
         assertEquals(MASTER_DB_AUTO_COMMIT_ENABLED, hikariConfig.isAutoCommit());
+        assertEquals(0L, hikariConfig.getLeakDetectionThreshold());
+    }
+
+    @Test
+    void testCreateNewDataSourceFor_ShouldOverridesMinPoolConfiguration_WhenConfigured() {
+        // given
+        FineractProperties.FineractModeProperties modeProperties = createModeProps(MASTER_DB_AUTO_COMMIT_ENABLED,
+                MASTER_DB_AUTO_COMMIT_ENABLED, MASTER_DB_AUTO_COMMIT_ENABLED, MASTER_DB_AUTO_COMMIT_ENABLED);
+        given(fineractProperties.getMode()).willReturn(modeProperties);
+
+        int minPoolSize = 10;
+
+        FineractProperties.FineractConfigProperties config = fineractProperties.getTenant().getConfig();
+        config.setMinPoolSize(minPoolSize);
+
+        // when
+        DataSource dataSource = underTest.createNewDataSourceFor(TENANT, defaultTenant.getConnection());
+
+        // then
+        assertNotNull(dataSource);
+        verify(hikariDataSourceFactory).create(hikariConfigCaptor.capture());
+        HikariConfig hikariConfig = hikariConfigCaptor.getValue();
+        assertFalse(hikariConfig.isReadOnly());
+        assertEquals(MASTER_DB_JDBC_URL, hikariConfig.getJdbcUrl());
+        assertEquals(MASTER_DB_SCHEMA_NAME + "_pool", hikariConfig.getPoolName());
+        assertEquals(MASTER_DB_USERNAME, hikariConfig.getUsername());
+        assertEquals(MASTER_DB_PASSWORD, hikariConfig.getPassword());
+        assertEquals(minPoolSize, hikariConfig.getMinimumIdle());
+        assertEquals(MASTER_DB_MAX_ACTIVE, hikariConfig.getMaximumPoolSize());
+        assertEquals(MASTER_DB_VALIDATION_INTERVAL, hikariConfig.getValidationTimeout());
+        assertEquals(MASTER_DB_DRIVER_CLASS_NAME, hikariConfig.getDriverClassName());
+        assertEquals(MASTER_DB_CONN_TEST_QUERY, hikariConfig.getConnectionTestQuery());
+        assertEquals(MASTER_DB_AUTO_COMMIT_ENABLED, hikariConfig.isAutoCommit());
+    }
+
+    @Test
+    void testCreateNewDataSourceFor_ShouldUseMasterLeakDetectionThreshold_WhenConfiguredOnHikari() {
+        // given
+        FineractProperties.FineractModeProperties modeProperties = createModeProps(MASTER_DB_AUTO_COMMIT_ENABLED,
+                MASTER_DB_AUTO_COMMIT_ENABLED, MASTER_DB_AUTO_COMMIT_ENABLED, MASTER_DB_AUTO_COMMIT_ENABLED);
+        given(fineractProperties.getMode()).willReturn(modeProperties);
+        given(tenantHikariConfig.getLeakDetectionThreshold()).willReturn(MASTER_DB_LEAK_DETECTION_THRESHOLD);
+
+        // when
+        DataSource dataSource = underTest.createNewDataSourceFor(TENANT, defaultTenant.getConnection());
+
+        // then
+        assertNotNull(dataSource);
+        verify(hikariDataSourceFactory).create(hikariConfigCaptor.capture());
+        HikariConfig hikariConfig = hikariConfigCaptor.getValue();
+        assertEquals(MASTER_DB_LEAK_DETECTION_THRESHOLD, hikariConfig.getLeakDetectionThreshold());
+    }
+
+    @Test
+    void testCreateNewDataSourceFor_ShouldOverrideLeakDetectionThreshold_WhenConfigured() {
+        // given
+        FineractProperties.FineractModeProperties modeProperties = createModeProps(MASTER_DB_AUTO_COMMIT_ENABLED,
+                MASTER_DB_AUTO_COMMIT_ENABLED, MASTER_DB_AUTO_COMMIT_ENABLED, MASTER_DB_AUTO_COMMIT_ENABLED);
+        given(fineractProperties.getMode()).willReturn(modeProperties);
+
+        FineractProperties.FineractConfigProperties config = fineractProperties.getTenant().getConfig();
+        config.setLeakDetectionThreshold(MASTER_DB_LEAK_DETECTION_THRESHOLD);
+
+        // when
+        DataSource dataSource = underTest.createNewDataSourceFor(TENANT, defaultTenant.getConnection());
+
+        // then
+        assertNotNull(dataSource);
+        verify(hikariDataSourceFactory).create(hikariConfigCaptor.capture());
+        HikariConfig hikariConfig = hikariConfigCaptor.getValue();
+        assertEquals(MASTER_DB_LEAK_DETECTION_THRESHOLD, hikariConfig.getLeakDetectionThreshold());
+    }
+
+    @Test
+    void testCreateNewDataSourceFor_ShouldOverridesMaxPoolConfiguration_WhenConfigured() {
+        // given
+        FineractProperties.FineractModeProperties modeProperties = createModeProps(MASTER_DB_AUTO_COMMIT_ENABLED,
+                MASTER_DB_AUTO_COMMIT_ENABLED, MASTER_DB_AUTO_COMMIT_ENABLED, MASTER_DB_AUTO_COMMIT_ENABLED);
+        given(fineractProperties.getMode()).willReturn(modeProperties);
+
+        int maxPoolSize = 10;
+
+        FineractProperties.FineractConfigProperties config = fineractProperties.getTenant().getConfig();
+        config.setMaxPoolSize(maxPoolSize);
+
+        // when
+        DataSource dataSource = underTest.createNewDataSourceFor(TENANT, defaultTenant.getConnection());
+
+        // then
+        assertNotNull(dataSource);
+        verify(hikariDataSourceFactory).create(hikariConfigCaptor.capture());
+        HikariConfig hikariConfig = hikariConfigCaptor.getValue();
+        assertFalse(hikariConfig.isReadOnly());
+        assertEquals(MASTER_DB_JDBC_URL, hikariConfig.getJdbcUrl());
+        assertEquals(MASTER_DB_SCHEMA_NAME + "_pool", hikariConfig.getPoolName());
+        assertEquals(MASTER_DB_USERNAME, hikariConfig.getUsername());
+        assertEquals(MASTER_DB_PASSWORD, hikariConfig.getPassword());
+        assertEquals(MASTER_DB_INITIAL_SIZE, hikariConfig.getMinimumIdle());
+        assertEquals(maxPoolSize, hikariConfig.getMaximumPoolSize());
+        assertEquals(MASTER_DB_VALIDATION_INTERVAL, hikariConfig.getValidationTimeout());
+        assertEquals(MASTER_DB_DRIVER_CLASS_NAME, hikariConfig.getDriverClassName());
+        assertEquals(MASTER_DB_CONN_TEST_QUERY, hikariConfig.getConnectionTestQuery());
+        assertEquals(MASTER_DB_AUTO_COMMIT_ENABLED, hikariConfig.isAutoCommit());
+    }
+
+    @Test
+    void testCreateNewDataSourceFor_ShouldOverridesMinAndMaxPoolConfiguration_WhenBothConfigured() {
+        // given
+        FineractProperties.FineractModeProperties modeProperties = createModeProps(MASTER_DB_AUTO_COMMIT_ENABLED,
+                MASTER_DB_AUTO_COMMIT_ENABLED, MASTER_DB_AUTO_COMMIT_ENABLED, MASTER_DB_AUTO_COMMIT_ENABLED);
+        given(fineractProperties.getMode()).willReturn(modeProperties);
+
+        int minPoolSize = 10;
+        int maxPoolSize = 10;
+
+        FineractProperties.FineractConfigProperties config = fineractProperties.getTenant().getConfig();
+        config.setMinPoolSize(minPoolSize);
+        config.setMaxPoolSize(maxPoolSize);
+
+        // when
+        DataSource dataSource = underTest.createNewDataSourceFor(TENANT, defaultTenant.getConnection());
+
+        // then
+        assertNotNull(dataSource);
+        verify(hikariDataSourceFactory).create(hikariConfigCaptor.capture());
+        HikariConfig hikariConfig = hikariConfigCaptor.getValue();
+        assertFalse(hikariConfig.isReadOnly());
+        assertEquals(MASTER_DB_JDBC_URL, hikariConfig.getJdbcUrl());
+        assertEquals(MASTER_DB_SCHEMA_NAME + "_pool", hikariConfig.getPoolName());
+        assertEquals(MASTER_DB_USERNAME, hikariConfig.getUsername());
+        assertEquals(MASTER_DB_PASSWORD, hikariConfig.getPassword());
+        assertEquals(minPoolSize, hikariConfig.getMinimumIdle());
+        assertEquals(maxPoolSize, hikariConfig.getMaximumPoolSize());
+        assertEquals(MASTER_DB_VALIDATION_INTERVAL, hikariConfig.getValidationTimeout());
+        assertEquals(MASTER_DB_DRIVER_CLASS_NAME, hikariConfig.getDriverClassName());
+        assertEquals(MASTER_DB_CONN_TEST_QUERY, hikariConfig.getConnectionTestQuery());
+        assertEquals(MASTER_DB_AUTO_COMMIT_ENABLED, hikariConfig.isAutoCommit());
     }
 
     @Test
@@ -177,7 +355,7 @@ public class DataSourcePerTenantServiceFactoryTest {
         given(fineractProperties.getMode()).willReturn(modeProperties);
 
         // when
-        DataSource dataSource = underTest.createNewDataSourceFor(defaultTenant.getConnection());
+        DataSource dataSource = underTest.createNewDataSourceFor(TENANT, defaultTenant.getConnection());
 
         // then
         assertNotNull(dataSource);
@@ -203,7 +381,7 @@ public class DataSourcePerTenantServiceFactoryTest {
         given(fineractProperties.getMode()).willReturn(modeProperties);
 
         // when
-        DataSource dataSource = underTest.createNewDataSourceFor(defaultTenant.getConnection());
+        DataSource dataSource = underTest.createNewDataSourceFor(TENANT, defaultTenant.getConnection());
 
         // then
         assertNotNull(dataSource);

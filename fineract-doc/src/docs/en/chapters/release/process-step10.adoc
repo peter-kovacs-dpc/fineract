@@ -2,19 +2,16 @@
 
 == Description
 
-Voting has to be done on dev@fineract.apache.org. You can close the vote after voting period expires (72 hours) and you accumulate sufficient votes (minimum 3 x +1 PMC votes).
+Initiate voting with https://release-test.apache.org[the ATR (ASF Trusted Releases) tool].
 
-[source,text]
-----
-include::{rootdir}/buildSrc/src/main/resources/email/release.step10.vote.subject.ftl[lines=21..]
-
-include::{rootdir}/buildSrc/src/main/resources/email/release.step10.vote.message.ftl[lines=21..]
-----
+Disable "Automatically publish to SVN when this vote resolves".
 
 == Gradle Task
 
 .Command
 [source,bash,subs="attributes+,+macros"]
 ----
-% ./gradlew fineractReleaseStep10 -Pfineract.release.version={revnumber}
+./gradlew fineractReleaseStep10
 ----
+
+NOTE: Use the ATR for this task.

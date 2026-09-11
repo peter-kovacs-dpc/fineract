@@ -30,12 +30,13 @@ import io.restassured.specification.RequestSpecification;
 import io.restassured.specification.ResponseSpecification;
 import java.security.SecureRandom;
 import java.util.Arrays;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
+import org.apache.fineract.client.models.AuditData;
+import org.apache.fineract.client.models.AuditSearchData;
 import org.apache.fineract.integrationtests.common.AuditHelper;
 import org.apache.fineract.integrationtests.common.ClientHelper;
 import org.apache.fineract.integrationtests.common.OfficeHelper;
+import org.apache.fineract.integrationtests.common.SchedulerJobHelper;
 import org.apache.fineract.integrationtests.common.Utils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,7 +51,6 @@ public class AuditIntegrationTest {
     private ResponseSpecification responseSpec;
     private RequestSpecification requestSpec;
     private ClientHelper clientHelper;
-    private AuditHelper auditHelper;
     private static final SecureRandom rand = new SecureRandom();
 
     /**
@@ -63,7 +63,6 @@ public class AuditIntegrationTest {
         this.requestSpec = new RequestSpecBuilder().setContentType(ContentType.JSON).build();
         this.requestSpec.header("Authorization", "Basic " + Utils.loginIntoServerAndGetBase64EncodedAuthenticationKey());
         this.responseSpec = new ResponseSpecBuilder().expectStatusCode(200).build();
-        this.auditHelper = new AuditHelper(this.requestSpec, this.responseSpec);
         this.clientHelper = new ClientHelper(this.requestSpec, this.responseSpec);
     }
 
@@ -71,56 +70,68 @@ public class AuditIntegrationTest {
     public void testAuditSearchTemplate() {
         // given
         // when
-        LinkedHashMap auditSearchTemplate = this.auditHelper.getAuditSearchTemplate();
+        AuditSearchData auditSearchTemplate = AuditHelper.getAuditSearchTemplate();
 
         // then
         assertNotNull(auditSearchTemplate);
-        assertEquals(4, auditSearchTemplate.size()); // appUsers, actionNames, entityNames, processingResults
-        assertTrue(((List) auditSearchTemplate.get("actionNames")).size() > 0);
+        assertTrue(auditSearchTemplate.getActionNames().size() > 0);
+
+        // verify all command processing status enum values are present and use enum_value (not enum_message_property)
+        assertNotNull(auditSearchTemplate.getStatuses());
+        assertEquals(6, auditSearchTemplate.getStatuses().size());
+
+        List<String> statusValues = auditSearchTemplate.getStatuses().stream().map(r -> r.getProcessingResult())
+                .collect(java.util.stream.Collectors.toList());
+
+        assertTrue(statusValues.contains("Invalid"));
+        assertTrue(statusValues.contains("Processed"));
+        assertTrue(statusValues.contains("Awaiting Approval"));
+        assertTrue(statusValues.contains("Rejected"));
+        assertTrue(statusValues.contains("Under Processing"));
+        assertTrue(statusValues.contains("Error"));
     }
 
     /**
      * Here we Create/Update different Entities and verify an audit is generated for each action. This can be further
      * extened with more entities and actions in similiar way.
      */
-    @SuppressWarnings("unchecked")
     @Test
     public void auditShouldbeCreated() {
         // Audits recieved after all actions are performed.
-        List<HashMap<String, Object>> auditsRecieved;
+        List<AuditData> auditsRecieved;
 
         // Audits recieved before any action is performed, needed in special
         // cases eg: reactivate client, close client
-        List<HashMap<String, Object>> auditsRecievedInitial;
+        List<AuditData> auditsRecievedInitial;
 
         // When Client is created: Count should be "1"
         final Integer clientId = ClientHelper.createClient(this.requestSpec, this.responseSpec);
         ClientHelper.verifyClientCreatedOnServer(this.requestSpec, this.responseSpec, clientId);
 
-        auditsRecieved = auditHelper.getAuditDetails(clientId, "CREATE", "CLIENT");
-        auditHelper.verifyOneAuditOnly(auditsRecieved, clientId, "CREATE", "CLIENT");
+        auditsRecieved = AuditHelper.getAuditDetails(clientId, "CREATE", "CLIENT");
+        AuditHelper.verifyOneAuditOnly(auditsRecieved, clientId, "CREATE", "CLIENT");
 
         // Performs multiple close and reactivate on client
 
         for (int i = 0; i < 4; i++) {
             // Close
-            auditsRecievedInitial = auditHelper.getAuditDetails(clientId, "CLOSE", "CLIENT");
+            auditsRecievedInitial = AuditHelper.getAuditDetails(clientId, "CLOSE", "CLIENT");
             this.clientHelper.closeClient(clientId);
-            auditsRecieved = auditHelper.getAuditDetails(clientId, "CLOSE", "CLIENT");
-            auditHelper.verifyMultipleAuditsOnserver(auditsRecievedInitial, auditsRecieved, clientId, "CLOSE", "CLIENT");
+            auditsRecieved = AuditHelper.getAuditDetails(clientId, "CLOSE", "CLIENT");
+            AuditHelper.verifyMultipleAuditsOnserver(auditsRecievedInitial, auditsRecieved, clientId, "CLOSE", "CLIENT");
 
             // Activate
-            auditsRecievedInitial = auditHelper.getAuditDetails(clientId, "REACTIVATE", "CLIENT");
+            auditsRecievedInitial = AuditHelper.getAuditDetails(clientId, "REACTIVATE", "CLIENT");
             this.clientHelper.reactivateClient(clientId);
-            auditsRecieved = auditHelper.getAuditDetails(clientId, "REACTIVATE", "CLIENT");
-            auditHelper.verifyMultipleAuditsOnserver(auditsRecievedInitial, auditsRecieved, clientId, "REACTIVATE", "CLIENT");
+            auditsRecieved = AuditHelper.getAuditDetails(clientId, "REACTIVATE", "CLIENT");
+            AuditHelper.verifyMultipleAuditsOnserver(auditsRecievedInitial, auditsRecieved, clientId, "REACTIVATE", "CLIENT");
         }
 
         // When Office is created
-        OfficeHelper officeHelper = new OfficeHelper(requestSpec, responseSpec);
-        int officeId = officeHelper.createOffice("22 June 2020");
-        auditsRecieved = auditHelper.getAuditDetails(officeId, "CREATE", "OFFICE");
-        auditHelper.verifyOneAuditOnly(auditsRecieved, officeId, "CREATE", "OFFICE");
+        OfficeHelper officeHelper = new OfficeHelper();
+        int officeId = officeHelper.createOffice(java.time.LocalDate.of(2020, 6, 22)).getResourceId().intValue();
+        auditsRecieved = AuditHelper.getAuditDetails(officeId, "CREATE", "OFFICE");
+        AuditHelper.verifyOneAuditOnly(auditsRecieved, officeId, "CREATE", "OFFICE");
     }
 
     @Test
@@ -141,7 +152,7 @@ public class AuditIntegrationTest {
         for (int i = 0; i < 3; i++) {
             // limit contains a number between 1-8
             int limit = rand.nextInt(7) + 1;
-            auditHelper.verifyLimitParameterfor(limit);
+            AuditHelper.verifyLimitParameterfor(limit);
         }
     }
 
@@ -152,9 +163,23 @@ public class AuditIntegrationTest {
                 "madeOnDate", "id", "loanId", "actionName");
 
         for (int i = 0; i < shouldBeSupportedFor.size(); i++) {
-            auditHelper.verifyOrderBysupported(shouldBeSupportedFor.get(i));
+            AuditHelper.verifyOrderBysupported(shouldBeSupportedFor.get(i));
         }
 
+    }
+
+    @Test
+    public void executeSchedulerJobShouldCreateAuditEntry() {
+        // given
+        int jobId = SchedulerJobHelper.getSchedulerJobIdByShortName("SA_AANF").intValue();
+        List<AuditData> auditsRecievedInitial = AuditHelper.getAuditDetails(jobId, "EXECUTEJOB", "SCHEDULER");
+
+        // when
+        SchedulerJobHelper.runSchedulerJob(jobId);
+
+        // then
+        List<AuditData> auditsRecieved = AuditHelper.getAuditDetails(jobId, "EXECUTEJOB", "SCHEDULER");
+        AuditHelper.verifyMultipleAuditsOnserver(auditsRecievedInitial, auditsRecieved, jobId, "EXECUTEJOB", "SCHEDULER");
     }
 
 }

@@ -18,13 +18,13 @@
  */
 package org.apache.fineract.portfolio.shareaccounts.domain;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.math.MathContext;
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.JoinColumn;
-import javax.persistence.ManyToOne;
-import javax.persistence.Table;
 import org.apache.fineract.infrastructure.core.domain.AbstractPersistableCustom;
 import org.apache.fineract.organisation.monetary.domain.MonetaryCurrency;
 import org.apache.fineract.organisation.monetary.domain.Money;
@@ -35,7 +35,7 @@ import org.apache.fineract.portfolio.charge.domain.ChargeTimeType;
 
 @Entity
 @Table(name = "m_share_account_charge")
-public class ShareAccountCharge extends AbstractPersistableCustom {
+public class ShareAccountCharge extends AbstractPersistableCustom<Long> {
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "account_id", referencedColumnName = "id", nullable = false)
@@ -374,7 +374,7 @@ public class ShareAccountCharge extends AbstractPersistableCustom {
     }
 
     public BigDecimal deriveChargeAmount(BigDecimal transactionAmount, final MonetaryCurrency currency) {
-        BigDecimal toReturnAmount = amountOrPercentage;
+        BigDecimal toReturnAmount;
         if (ChargeCalculationType.fromInt(this.chargeCalculation) == ChargeCalculationType.PERCENT_OF_AMOUNT) {
             toReturnAmount = Money.of(currency, percentageOf(transactionAmount, this.percentage)).getAmount();
             this.amountPercentageAppliedTo = transactionAmount;
@@ -384,7 +384,8 @@ public class ShareAccountCharge extends AbstractPersistableCustom {
             this.amountWaived = null;
             this.amountWrittenOff = null;
         } else {
-            this.amount = this.amountOrPercentage;
+            this.amount = Money.of(currency, this.amountOrPercentage).getAmount();
+            toReturnAmount = this.amount;
             this.amountOutstanding = calculateOutstanding();
             this.amountWaived = null;
             this.amountWrittenOff = null;
@@ -393,7 +394,7 @@ public class ShareAccountCharge extends AbstractPersistableCustom {
     }
 
     public BigDecimal updateChargeDetailsForAdditionalSharesRequest(final BigDecimal transactionAmount, final MonetaryCurrency currency) {
-        BigDecimal toReturnAmount = amountOrPercentage;
+        BigDecimal toReturnAmount;
         if (ChargeCalculationType.fromInt(this.chargeCalculation) == ChargeCalculationType.PERCENT_OF_AMOUNT) {
             toReturnAmount = Money.of(currency, percentageOf(transactionAmount, this.percentage)).getAmount();
             this.amountPercentageAppliedTo = this.amountPercentageAppliedTo.add(transactionAmount);
@@ -402,7 +403,9 @@ public class ShareAccountCharge extends AbstractPersistableCustom {
             this.amountWaived = null;
             this.amountWrittenOff = null;
         } else {
-            this.amount = this.amount.add(this.amountOrPercentage);
+            BigDecimal roundedAmount = Money.of(currency, this.amountOrPercentage).getAmount();
+            toReturnAmount = roundedAmount;
+            this.amount = this.amount.add(roundedAmount);
             this.amountOutstanding = calculateOutstanding();
             this.amountWaived = null;
             this.amountWrittenOff = null;

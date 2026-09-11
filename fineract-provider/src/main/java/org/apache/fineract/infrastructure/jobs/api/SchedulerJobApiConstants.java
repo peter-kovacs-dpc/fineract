@@ -39,6 +39,7 @@ public final class SchedulerJobApiConstants {
     public static final String currentlyRunningParamName = "currentlyRunning";
     public static final String lastRunHistoryObjParamName = "lastRunHistory";
 
+    public static final String idParamName = "id";
     public static final String versionParamName = "version";
     public static final String jobRunStartTimeParamName = "jobRunStartTime";
     public static final String jobRunEndTimeParamName = "jobRunEndTime";
@@ -54,6 +55,7 @@ public final class SchedulerJobApiConstants {
     public static final String COMMAND_START_SCHEDULER = "start";
     public static final String COMMAND = "command";
     public static final String JOB_ID = "jobId";
+    public static final String SHORT_NAME_PARAM = "short-name";
     public static final String JOB_RUN_HISTORY = "runhistory";
     public static final String SCHEDULER_STATUS_PATH = "scheduler";
 
@@ -61,8 +63,9 @@ public final class SchedulerJobApiConstants {
             Arrays.asList(jobIdentifierParamName, displayNameParamName, nextRunTimeParamName, initializingErrorParamName,
                     cronExpressionParamName, jobActiveStatusParamName, currentlyRunningParamName, lastRunHistoryObjParamName));
 
-    static final Set<String> JOB_HISTORY_RESPONSE_DATA_PARAMETERS = new HashSet<>(Arrays.asList(versionParamName, jobRunStartTimeParamName,
-            jobRunEndTimeParamName, statusParamName, jobRunErrorMessageParamName, triggerTypeParamName, jobRunErrorLogParamName));
+    static final Set<String> JOB_HISTORY_RESPONSE_DATA_PARAMETERS = new HashSet<>(
+            Arrays.asList(idParamName, versionParamName, jobRunStartTimeParamName, jobRunEndTimeParamName, statusParamName,
+                    jobRunErrorMessageParamName, triggerTypeParamName, jobRunErrorLogParamName));
 
     static final Set<String> SCHEDULER_DETAIL_RESPONSE_DATA_PARAMETERS = new HashSet<>(Arrays.asList(schedulerStatusParamName));
 }

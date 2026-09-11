@@ -21,6 +21,7 @@ package org.apache.fineract.infrastructure.campaigns.email.service;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Collection;
+import lombok.RequiredArgsConstructor;
 import org.apache.fineract.infrastructure.campaigns.email.data.EmailConfigurationData;
 import org.apache.fineract.infrastructure.campaigns.email.exception.EmailConfigurationNotFoundException;
 import org.apache.fineract.infrastructure.core.domain.JdbcSupport;
@@ -31,6 +32,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
 
 @Service
+@RequiredArgsConstructor
 public class EmailConfigurationReadPlatformServiceImpl implements EmailConfigurationReadPlatformService {
 
     private final JdbcTemplate jdbcTemplate;
@@ -44,20 +46,16 @@ public class EmailConfigurationReadPlatformServiceImpl implements EmailConfigura
 
     private static final class EmailConfigurationRowMapper implements RowMapper<EmailConfigurationData> {
 
-        final String schema;
+        private static final String EMAIL_CONFIGURATION_SCHEMA = """
+                cnf.id as id,
+                cnf.name as name,
+                cnf.value as value
+                from scheduled_email_configuration cnf\s""";
 
-        EmailConfigurationRowMapper() {
-            final StringBuilder sql = new StringBuilder(300);
-            sql.append("cnf.id as id, ");
-            sql.append("cnf.name as name, ");
-            sql.append("cnf.value as value ");
-            sql.append("from scheduled_email_configuration cnf");
-
-            this.schema = sql.toString();
-        }
+        EmailConfigurationRowMapper() {}
 
         public String schema() {
-            return this.schema;
+            return EMAIL_CONFIGURATION_SCHEMA;
         }
 
         @Override

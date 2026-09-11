@@ -19,138 +19,85 @@
 package org.apache.fineract.integrationtests;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-import io.restassured.builder.RequestSpecBuilder;
-import io.restassured.builder.ResponseSpecBuilder;
-import io.restassured.http.ContentType;
-import io.restassured.specification.RequestSpecification;
-import io.restassured.specification.ResponseSpecification;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
-import org.apache.fineract.integrationtests.common.ClientHelper;
-import org.apache.fineract.integrationtests.common.CommonConstants;
-import org.apache.fineract.integrationtests.common.GlobalConfigurationHelper;
-import org.apache.fineract.integrationtests.common.Utils;
-import org.apache.fineract.integrationtests.common.savings.SavingsAccountHelper;
-import org.apache.fineract.integrationtests.common.savings.SavingsProductHelper;
-import org.apache.fineract.integrationtests.common.savings.SavingsStatusChecker;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.Month;
+import java.util.List;
+import org.apache.fineract.client.models.PostSavingsProductsResponse;
+import org.apache.fineract.client.models.PutGlobalConfigurationsRequest;
+import org.apache.fineract.client.models.SavingsAccountTransactionData;
+import org.apache.fineract.infrastructure.configuration.api.GlobalConfigurationConstants;
+import org.apache.fineract.integrationtests.client.feign.FeignSavingsTestBase;
+import org.apache.fineract.integrationtests.client.feign.modules.SavingsRequestBuilders;
+import org.apache.fineract.integrationtests.client.feign.modules.SavingsTestData;
+import org.apache.fineract.integrationtests.client.feign.modules.SavingsTestValidators;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-@SuppressWarnings({ "rawtypes", "unused", "unchecked" })
-public class FlexibleSavingsInterestPostingIntegrationTest {
+public class FlexibleSavingsInterestPostingIntegrationTest extends FeignSavingsTestBase {
 
-    private static final Logger LOG = LoggerFactory.getLogger(FlexibleSavingsInterestPostingIntegrationTest.class);
-    public static final String ACCOUNT_TYPE_INDIVIDUAL = "INDIVIDUAL";
+    private static final String START_DATE = "01 December 2013";
+    private static final long APRIL = 4L;
 
-    private ResponseSpecification responseSpec;
-    private RequestSpecification requestSpec;
-    private SavingsProductHelper savingsProductHelper;
-    private SavingsAccountHelper savingsAccountHelper;
-
-    @BeforeEach
-    public void setup() {
-        Utils.initializeRESTAssured();
-        this.requestSpec = new RequestSpecBuilder().setContentType(ContentType.JSON).build();
-        this.requestSpec.header("Authorization", "Basic " + Utils.loginIntoServerAndGetBase64EncodedAuthenticationKey());
-        this.responseSpec = new ResponseSpecBuilder().expectStatusCode(200).build();
-        this.savingsAccountHelper = new SavingsAccountHelper(this.requestSpec, this.responseSpec);
-        this.savingsProductHelper = new SavingsProductHelper();
-    }
+    // 1st Dec 13 to 31st March 14 - 365 days, daily compounding using daily balance
+    // 33.7016 obtained from formula in excel provided by Subramanya
+    private static final BigDecimal EXPECTED_INTEREST_POSTED = new BigDecimal("33.7016");
+    private static final LocalDate EXPECTED_INTEREST_POSTING_DATE = LocalDate.of(2014, Month.MARCH, 31);
 
     @Test
     public void testSavingsInterestPostingAtPeriodEnd() {
-        // client activation, savings activation and 1st transaction date
-        final String startDate = "01 December 2013";
-        final Integer clientID = ClientHelper.createClient(this.requestSpec, this.responseSpec, startDate);
-        Assertions.assertNotNull(clientID);
+        Long clientId = createClient(START_DATE);
+        assertNotNull(clientId);
 
-        // Configuring global config flags
-        configureInterestPosting(true, 4);
+        configureInterestPosting(true, APRIL);
 
-        final Integer savingsId = createSavingsAccount(clientID, startDate);
+        Long savingsId = createSavingsAccount(clientId, START_DATE);
 
-        this.savingsAccountHelper.depositToSavingsAccount(savingsId, "1000", startDate, CommonConstants.RESPONSE_RESOURCE_ID);
+        deposit(savingsId, "1000", START_DATE);
 
-        /***
-         * Perform Post interest transaction and verify the posted transaction date
-         */
-        this.savingsAccountHelper.postInterestForSavings(savingsId);
-        HashMap accountDetails = this.savingsAccountHelper.getSavingsDetails(savingsId);
-        ArrayList<HashMap<String, Object>> transactions = (ArrayList<HashMap<String, Object>>) accountDetails.get("transactions");
-        HashMap<String, Object> interestPostingTransaction = transactions.get(transactions.size() - 2);
-        for (Map.Entry<String, Object> entry : interestPostingTransaction.entrySet()) {
-            LOG.info("{} - {}", entry.getKey(), entry.getValue().toString());
-        }
-        // 1st Dec 13 to 31st March 14 - 365 days, daily compounding using daily
-        // balance
-        // 33.7016 obtained from formula in excel provided by Subramanya
-        assertEquals("33.7016", interestPostingTransaction.get("amount").toString(), "Equality check for interest posted amount");
-        assertEquals("[2014, 3, 31]", interestPostingTransaction.get("date").toString(), "Date check for Interest Posting transaction");
+        savingsHelper.postInterest(savingsId);
 
+        List<SavingsAccountTransactionData> transactions = savingsTransactionHelper.getTransactions(savingsId);
+        SavingsAccountTransactionData interestPostingTransaction = transactions.get(transactions.size() - 2);
+        SavingsTestValidators.verifyIsInterestPosting(interestPostingTransaction);
+
+        SavingsTestValidators.verifyAmount(EXPECTED_INTEREST_POSTED, interestPostingTransaction.getAmount(),
+                "Equality check for interest posted amount");
+        assertEquals(EXPECTED_INTEREST_POSTING_DATE, interestPostingTransaction.getDate(), "Date check for Interest Posting transaction");
     }
 
-    private Integer createSavingsAccount(final Integer clientID, final String startDate) {
-        final Integer savingsProductID = createSavingsProduct();
-        Assertions.assertNotNull(savingsProductID);
-        final Integer savingsId = this.savingsAccountHelper.applyForSavingsApplicationOnDate(clientID, savingsProductID,
-                ACCOUNT_TYPE_INDIVIDUAL, startDate);
-        Assertions.assertNotNull(savingsId);
-        HashMap savingsStatusHashMap = this.savingsAccountHelper.approveSavingsOnDate(savingsId, startDate);
-        SavingsStatusChecker.verifySavingsIsApproved(savingsStatusHashMap);
-        savingsStatusHashMap = this.savingsAccountHelper.activateSavingsAccount(savingsId, startDate);
-        SavingsStatusChecker.verifySavingsIsActive(savingsStatusHashMap);
+    private Long createSavingsAccount(final Long clientId, final String startDate) {
+        PostSavingsProductsResponse savingsProduct = createSavingsProductAnnualPosting();
+        assertNotNull(savingsProduct.getResourceId());
+
+        Long savingsId = submitSavingsApplication(clientId, savingsProduct.getResourceId(), startDate).getSavingsId();
+        assertNotNull(savingsId);
+
+        approveSavings(savingsId, startDate);
+        SavingsTestValidators.verifySavingsIsApproved(savingsHelper.getSavingsStatus(savingsId));
+
+        activateSavings(savingsId, startDate);
+        SavingsTestValidators.verifySavingsIsActive(savingsHelper.getSavingsStatus(savingsId));
         return savingsId;
     }
 
-    private void configureInterestPosting(final Boolean periodEndEnable, final Integer financialYearBeginningMonth) {
-        final ArrayList<HashMap> globalConfig = GlobalConfigurationHelper.getAllGlobalConfigurations(this.requestSpec, this.responseSpec);
-        Assertions.assertNotNull(globalConfig);
-
-        // Updating flag for interest posting at period end
-        Integer periodEndConfigId = (Integer) globalConfig.get(10).get("id");
-        Assertions.assertNotNull(periodEndConfigId);
-
-        HashMap periodEndConfigData = GlobalConfigurationHelper.getGlobalConfigurationById(this.requestSpec, this.responseSpec,
-                periodEndConfigId.toString());
-        Assertions.assertNotNull(periodEndConfigData);
-
-        Boolean enabled = (Boolean) globalConfig.get(10).get("enabled");
-
-        if (!enabled.equals(periodEndEnable)) {
-            periodEndConfigId = GlobalConfigurationHelper.updateEnabledFlagForGlobalConfiguration(this.requestSpec, this.responseSpec,
-                    periodEndConfigId.toString(), periodEndEnable);
-        }
-
-        // Updating value for financial year beginning month
-        Integer financialYearBeginningConfigId = (Integer) globalConfig.get(11).get("id");
-        Assertions.assertNotNull(financialYearBeginningConfigId);
-
-        HashMap financialYearBeginningConfigData = GlobalConfigurationHelper.getGlobalConfigurationById(this.requestSpec, this.responseSpec,
-                financialYearBeginningConfigId.toString());
-        Assertions.assertNotNull(financialYearBeginningConfigData);
-
-        financialYearBeginningConfigId = GlobalConfigurationHelper.updateValueForGlobalConfiguration(this.requestSpec, this.responseSpec,
-                financialYearBeginningConfigId.toString(), financialYearBeginningMonth.toString());
-        Assertions.assertNotNull(financialYearBeginningConfigId);
+    private void configureInterestPosting(final Boolean periodEndEnable, final Long financialYearBeginningMonth) {
+        globalConfigurationHelper.updateGlobalConfiguration(GlobalConfigurationConstants.SAVINGS_INTEREST_POSTING_CURRENT_PERIOD_END,
+                new PutGlobalConfigurationsRequest().enabled(periodEndEnable));
+        globalConfigurationHelper.updateGlobalConfiguration(GlobalConfigurationConstants.FINANCIAL_YEAR_BEGINNING_MONTH,
+                new PutGlobalConfigurationsRequest().value(financialYearBeginningMonth));
     }
 
-    private Integer createSavingsProduct() {
-        final String savingsProductJSON = this.savingsProductHelper.withInterestCompoundingPeriodTypeAsDaily()
-                .withInterestPostingPeriodTypeAsAnnual().withInterestCalculationPeriodTypeAsDailyBalance().build();
-        return SavingsProductHelper.createSavingsProduct(savingsProductJSON, requestSpec, responseSpec);
+    private PostSavingsProductsResponse createSavingsProductAnnualPosting() {
+        return createSavingsProduct(SavingsRequestBuilders.savingsProduct(SavingsTestData.InterestCompoundingPeriodType.DAILY,
+                SavingsTestData.InterestPostingPeriodType.ANNUAL, SavingsTestData.InterestCalculationType.DAILY_BALANCE));
     }
 
-    // Reset configuration fields
     @AfterEach
     public void tearDown() {
-        GlobalConfigurationHelper.resetAllDefaultGlobalConfigurations(this.requestSpec, this.responseSpec);
-        GlobalConfigurationHelper.verifyAllDefaultGlobalConfigurations(this.requestSpec, this.responseSpec);
+        globalConfigurationHelper.resetAllDefaultGlobalConfigurations();
+        globalConfigurationHelper.verifyAllDefaultGlobalConfigurations();
     }
-
 }

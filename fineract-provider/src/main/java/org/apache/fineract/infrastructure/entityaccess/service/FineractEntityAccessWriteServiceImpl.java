@@ -18,19 +18,18 @@
  */
 package org.apache.fineract.infrastructure.entityaccess.service;
 
+import jakarta.persistence.PersistenceException;
 import java.time.LocalDate;
 import java.util.Map;
-import javax.persistence.PersistenceException;
 import org.apache.commons.lang3.exception.ExceptionUtils;
-import org.apache.fineract.infrastructure.codes.domain.CodeValue;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuilder;
+import org.apache.fineract.infrastructure.core.exception.ErrorHandler;
 import org.apache.fineract.infrastructure.core.exception.PlatformDataIntegrityException;
+import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.infrastructure.entityaccess.api.FineractEntityApiResourceConstants;
 import org.apache.fineract.infrastructure.entityaccess.data.FineractEntityDataValidator;
-import org.apache.fineract.infrastructure.entityaccess.domain.FineractEntityAccess;
-import org.apache.fineract.infrastructure.entityaccess.domain.FineractEntityAccessRepository;
 import org.apache.fineract.infrastructure.entityaccess.domain.FineractEntityRelation;
 import org.apache.fineract.infrastructure.entityaccess.domain.FineractEntityRelationRepositoryWrapper;
 import org.apache.fineract.infrastructure.entityaccess.domain.FineractEntityToEntityMapping;
@@ -49,19 +48,16 @@ import org.springframework.transaction.annotation.Transactional;
 public class FineractEntityAccessWriteServiceImpl implements FineractEntityAccessWriteService {
 
     private static final Logger LOG = LoggerFactory.getLogger(FineractEntityAccessWriteServiceImpl.class);
-    private final FineractEntityAccessRepository entityAccessRepository;
     private final FineractEntityRelationRepositoryWrapper fineractEntityRelationRepositoryWrapper;
     private final FineractEntityToEntityMappingRepository fineractEntityToEntityMappingRepository;
     private final FineractEntityToEntityMappingRepositoryWrapper fineractEntityToEntityMappingRepositoryWrapper;
     private final FineractEntityDataValidator fromApiJsonDeserializer;
 
     @Autowired
-    public FineractEntityAccessWriteServiceImpl(final FineractEntityAccessRepository entityAccessRepository,
-            final FineractEntityRelationRepositoryWrapper fineractEntityRelationRepositoryWrapper,
+    public FineractEntityAccessWriteServiceImpl(final FineractEntityRelationRepositoryWrapper fineractEntityRelationRepositoryWrapper,
             final FineractEntityToEntityMappingRepository fineractEntityToEntityMappingRepository,
             final FineractEntityToEntityMappingRepositoryWrapper fineractEntityToEntityMappingRepositoryWrapper,
             FineractEntityDataValidator fromApiJsonDeserializer) {
-        this.entityAccessRepository = entityAccessRepository;
         this.fineractEntityToEntityMappingRepository = fineractEntityToEntityMappingRepository;
         this.fromApiJsonDeserializer = fromApiJsonDeserializer;
         this.fineractEntityRelationRepositoryWrapper = fineractEntityRelationRepositoryWrapper;
@@ -69,26 +65,9 @@ public class FineractEntityAccessWriteServiceImpl implements FineractEntityAcces
     }
 
     @Override
-    public CommandProcessingResult createEntityAccess(@SuppressWarnings("unused") JsonCommand command) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    @Transactional
-    public void addNewEntityAccess(final String entityType, final Long entityId, final CodeValue accessType, final String secondEntityType,
-            final Long secondEntityId) {
-        FineractEntityAccess entityAccess = FineractEntityAccess.createNew(entityType, entityId, accessType, secondEntityType,
-                secondEntityId);
-        entityAccessRepository.save(entityAccess);
-    }
-
-    @Override
     @Transactional
     public CommandProcessingResult createEntityToEntityMapping(Long relId, JsonCommand command) {
-
         try {
-
             this.fromApiJsonDeserializer.validateForCreate(command.json());
 
             final FineractEntityRelation mapId = this.fineractEntityRelationRepositoryWrapper.findOneWithNotFoundDetection(relId);
@@ -99,17 +78,18 @@ public class FineractEntityAccessWriteServiceImpl implements FineractEntityAcces
             final LocalDate endDate = command.localDateValueOfParameterNamed(FineractEntityApiResourceConstants.endDate);
 
             fromApiJsonDeserializer.checkForEntity(relId.toString(), fromId, toId);
-            if (startDate != null && endDate != null) {
-                if (endDate.isBefore(startDate)) {
-                    throw new FineractEntityToEntityMappingDateException(startDate.toString(), endDate.toString());
-                }
+            if (endDate != null && DateUtils.isBefore(endDate, startDate)) {
+                throw new FineractEntityToEntityMappingDateException(startDate.toString(), endDate.toString());
             }
 
             final FineractEntityToEntityMapping newMap = FineractEntityToEntityMapping.newMap(mapId, fromId, toId, startDate, endDate);
 
             this.fineractEntityToEntityMappingRepository.saveAndFlush(newMap);
 
-            return new CommandProcessingResultBuilder().withEntityId(newMap.getId()).withCommandId(command.commandId()).build();
+            return new CommandProcessingResultBuilder() //
+                    .withEntityId(newMap.getId()) //
+                    .withCommandId(command.commandId()) //
+                    .build();
         } catch (final JpaSystemException | DataIntegrityViolationException dve) {
             handleDataIntegrityIssues(command, dve.getMostSpecificCause(), dve);
             return CommandProcessingResult.empty();
@@ -123,9 +103,7 @@ public class FineractEntityAccessWriteServiceImpl implements FineractEntityAcces
     @Override
     @Transactional
     public CommandProcessingResult updateEntityToEntityMapping(Long mapId, JsonCommand command) {
-
         try {
-
             this.fromApiJsonDeserializer.validateForUpdate(command.json());
 
             final FineractEntityToEntityMapping mapForUpdate = this.fineractEntityToEntityMappingRepositoryWrapper
@@ -141,8 +119,10 @@ public class FineractEntityAccessWriteServiceImpl implements FineractEntityAcces
             if (!changes.isEmpty()) {
                 this.fineractEntityToEntityMappingRepository.saveAndFlush(mapForUpdate);
             }
-            return new CommandProcessingResultBuilder(). //
-                    withEntityId(mapForUpdate.getId()).withCommandId(command.commandId()).build();
+            return new CommandProcessingResultBuilder() //
+                    .withEntityId(mapForUpdate.getId()) //
+                    .withCommandId(command.commandId()) //
+                    .build();
         } catch (final JpaSystemException | DataIntegrityViolationException dve) {
             handleDataIntegrityIssues(command, dve.getMostSpecificCause(), dve);
             return CommandProcessingResult.empty();
@@ -162,8 +142,9 @@ public class FineractEntityAccessWriteServiceImpl implements FineractEntityAcces
                 .findOneWithNotFoundDetection(mapId);
         this.fineractEntityToEntityMappingRepository.delete(deleteMap);
 
-        return new CommandProcessingResultBuilder(). //
-                withEntityId(deleteMap.getId()).build();
+        return new CommandProcessingResultBuilder() //
+                .withEntityId(deleteMap.getId()) //
+                .build();
 
     }
 
@@ -176,20 +157,8 @@ public class FineractEntityAccessWriteServiceImpl implements FineractEntityAcces
                     "EntityMapping from " + fromId + " to " + toId + " already exist");
         }
 
-        logAsErrorUnexpectedDataIntegrityException(dve);
-        throw new PlatformDataIntegrityException("error.msg.entity.mapping", "Unknown data integrity issue with resource.");
+        LOG.error("Error occurred.", dve);
+        throw ErrorHandler.getMappable(dve, "error.msg.entity.mapping", "Unknown data integrity issue with resource.");
     }
-
-    private void logAsErrorUnexpectedDataIntegrityException(final Exception dve) {
-        LOG.error("Error occured.", dve);
-    }
-
-    /*
-     * @Override public CommandProcessingResult updateEntityAccess(Long entityAccessId, JsonCommand command) { // TODO
-     * Auto-generated method stub return null; }
-     *
-     * @Override public CommandProcessingResult removeEntityAccess(String entityType, Long entityId, Long accessType,
-     * String secondEntityType, Long secondEntityId) { // TODO Auto-generated method stub return null; }
-     */
 
 }

@@ -18,75 +18,56 @@
  */
 package org.apache.fineract.integrationtests.common;
 
-import com.google.gson.Gson;
-import io.restassured.specification.RequestSpecification;
-import io.restassured.specification.ResponseSpecification;
-import java.util.ArrayList;
-import java.util.HashMap;
+import static org.apache.fineract.client.feign.util.FeignCalls.ok;
+
+import java.time.LocalDate;
+import java.util.Collections;
 import java.util.List;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.fineract.client.models.GetHolidaysResponse;
+import org.apache.fineract.client.models.PostHolidaysRequest;
+import org.apache.fineract.client.models.PostHolidaysRequestOffices;
 
-@SuppressWarnings({ "unused", "rawtypes" })
-public class HolidayHelper {
+public final class HolidayHelper {
 
-    private static final Logger LOG = LoggerFactory.getLogger(HolidayHelper.class);
-    private static final String HOLIDAYS_URL = "/fineract-provider/api/v1/holidays";
-    private static final String CREATE_HOLIDAY_URL = HOLIDAYS_URL + "?" + Utils.TENANT_IDENTIFIER;
+    private HolidayHelper() {
 
-    private static final String OFFICE_ID = "1";
-
-    private final RequestSpecification requestSpec;
-    private final ResponseSpecification responseSpec;
-
-    public HolidayHelper(final RequestSpecification requestSpec, final ResponseSpecification responseSpec) {
-        this.requestSpec = requestSpec;
-        this.responseSpec = responseSpec;
     }
 
-    public static String getCreateHolidayDataAsJSON() {
-        final HashMap<String, Object> map = new HashMap<>();
-        List<HashMap<String, String>> offices = new ArrayList<HashMap<String, String>>();
-        HashMap<String, String> officeMap = new HashMap<>();
-        officeMap.put("officeId", OFFICE_ID);
-        offices.add(officeMap);
+    private static final Long OFFICE_ID = 1L;
 
-        map.put("offices", offices);
-        map.put("locale", "en");
-        map.put("dateFormat", "dd MMMM yyyy");
-        map.put("name", Utils.randomNameGenerator("HOLIDAY_", 5));
-        map.put("fromDate", "01 April 2013");
-        map.put("toDate", "01 April 2013");
-        map.put("repaymentsRescheduledTo", "08 April 2013");
-        map.put("reschedulingType", 2);
-        String HolidayCreateJson = new Gson().toJson(map);
-        LOG.info("{}", HolidayCreateJson);
-        return HolidayCreateJson;
+    public static PostHolidaysRequest getCreateHolidayRequest() {
+        return new PostHolidaysRequest().offices(List.of(new PostHolidaysRequestOffices().officeId(OFFICE_ID))).locale("en")
+                .dateFormat("yyyy-MM-dd").name(Utils.uniqueRandomStringGenerator("HOLIDAY_", 5)).fromDate(LocalDate.of(2013, 4, 1))
+                .toDate(LocalDate.of(2013, 4, 1)).repaymentsRescheduledTo(LocalDate.of(2013, 4, 8)).reschedulingType(2);
     }
 
-    public static String getActivateHolidayDataAsJSON() {
-        final HashMap<String, String> map = new HashMap<>();
-        String activateHoliday = new Gson().toJson(map);
-        LOG.info("{}", activateHoliday);
-        return activateHoliday;
+    public static PostHolidaysRequest getCreateType1HolidayRequest() {
+        return new PostHolidaysRequest().offices(List.of(new PostHolidaysRequestOffices().officeId(OFFICE_ID))).locale("en")
+                .dateFormat("yyyy-MM-dd").name(Utils.uniqueRandomStringGenerator("HOLIDAY_", 5)).fromDate(LocalDate.of(2024, 4, 4))
+                .toDate(LocalDate.of(2024, 4, 4)).reschedulingType(1);
     }
 
-    public static Integer createHolidays(final RequestSpecification requestSpec, final ResponseSpecification responseSpec) {
-        return Utils.performServerPost(requestSpec, responseSpec, CREATE_HOLIDAY_URL, getCreateHolidayDataAsJSON(), "resourceId");
+    public static Long createHolidays() {
+        return ok(() -> FineractFeignClientHelper.getFineractFeignClient().holidays().createHoliday(getCreateHolidayRequest()))
+                .getResourceId();
     }
 
-    public static Integer activateHolidays(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
-            final String holidayID) {
-        final String ACTIVATE_HOLIDAY_URL = HOLIDAYS_URL + "/" + holidayID + "?command=activate&" + Utils.TENANT_IDENTIFIER;
-        return Utils.performServerPost(requestSpec, responseSpec, ACTIVATE_HOLIDAY_URL, getActivateHolidayDataAsJSON(), "resourceId");
+    public static Long createTyoe1Holidays() {
+        return ok(() -> FineractFeignClientHelper.getFineractFeignClient().holidays().createHoliday(getCreateType1HolidayRequest()))
+                .getResourceId();
     }
 
-    public static HashMap getHolidayById(final RequestSpecification requestSpec, final ResponseSpecification responseSpec,
-            final String holidayID) {
-        final String GET_HOLIDAY_BY_ID_URL = HOLIDAYS_URL + "/" + holidayID + "?" + Utils.TENANT_IDENTIFIER;
-        LOG.info("------------------------ RETRIEVING HOLIDAY BY ID -------------------------");
-        final HashMap response = Utils.performServerGet(requestSpec, responseSpec, GET_HOLIDAY_BY_ID_URL, "");
-        return response;
+    public static Long activateHolidays(final Long holidayId) {
+        return ok(() -> FineractFeignClientHelper.getFineractFeignClient().holidays().handleCommandsHoliday(holidayId,
+                Collections.emptyMap(), "activate")).getResourceId();
+    }
+
+    public static GetHolidaysResponse getHolidayById(final Long holidayId) {
+        return ok(() -> FineractFeignClientHelper.getFineractFeignClient().holidays().retrieveOneHoliday(holidayId));
+    }
+
+    public static Long deleteHoliday(final Long holidayId) {
+        return ok(() -> FineractFeignClientHelper.getFineractFeignClient().holidays().deleteHoliday(holidayId)).getResourceId();
     }
 
 }

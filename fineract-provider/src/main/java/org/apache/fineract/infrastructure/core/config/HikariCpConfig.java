@@ -19,9 +19,7 @@
 
 package org.apache.fineract.infrastructure.core.config;
 
-import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
-import javax.sql.DataSource;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -34,14 +32,9 @@ public class HikariCpConfig {
     // TODO: we can get rid of this config class by defining "spring.hikariTenantDataSource.hikari.*" in
     // "application.properties" and enabling auto-configuration
 
-    @Bean
-    @ConfigurationProperties(prefix = "spring.datasource.hikari")
-    public HikariConfig hikariConfig() {
-        return new HikariConfig();
-    }
-
     @Bean(destroyMethod = "close")
-    public DataSource hikariTenantDataSource(HikariConfig hikariConfig) {
-        return new HikariDataSource(hikariConfig);
+    @ConfigurationProperties(prefix = "spring.datasource.hikari")
+    public HikariDataSource hikariTenantDataSource() {
+        return new HikariDataSource();
     }
 }

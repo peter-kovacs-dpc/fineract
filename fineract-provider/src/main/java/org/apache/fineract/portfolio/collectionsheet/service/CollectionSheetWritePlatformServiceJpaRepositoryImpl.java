@@ -23,58 +23,42 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuilder;
+import org.apache.fineract.infrastructure.core.service.TransactionBoundApplicationEventPublisher;
 import org.apache.fineract.portfolio.collectionsheet.command.CollectionSheetBulkDisbursalCommand;
 import org.apache.fineract.portfolio.collectionsheet.command.CollectionSheetBulkRepaymentCommand;
 import org.apache.fineract.portfolio.collectionsheet.data.CollectionSheetTransactionDataValidator;
 import org.apache.fineract.portfolio.collectionsheet.serialization.CollectionSheetBulkDisbursalCommandFromApiJsonDeserializer;
 import org.apache.fineract.portfolio.collectionsheet.serialization.CollectionSheetBulkRepaymentCommandFromApiJsonDeserializer;
 import org.apache.fineract.portfolio.loanaccount.service.LoanWritePlatformService;
-import org.apache.fineract.portfolio.meeting.service.MeetingWritePlatformService;
 import org.apache.fineract.portfolio.paymentdetail.domain.PaymentDetail;
-import org.apache.fineract.portfolio.paymentdetail.domain.PaymentDetailAssembler;
 import org.apache.fineract.portfolio.paymentdetail.service.PaymentDetailWritePlatformService;
 import org.apache.fineract.portfolio.savings.data.SavingsAccountTransactionDTO;
 import org.apache.fineract.portfolio.savings.domain.DepositAccountAssembler;
 import org.apache.fineract.portfolio.savings.domain.SavingsAccountTransaction;
 import org.apache.fineract.portfolio.savings.service.DepositAccountWritePlatformService;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.stereotype.Service;
 
+@Slf4j
+@RequiredArgsConstructor
 @Service
+@ConditionalOnMissingBean(value = CollectionSheetWritePlatformService.class, ignored = CollectionSheetWritePlatformServiceJpaRepositoryImpl.class)
 public class CollectionSheetWritePlatformServiceJpaRepositoryImpl implements CollectionSheetWritePlatformService {
 
     private final LoanWritePlatformService loanWritePlatformService;
     private final CollectionSheetBulkRepaymentCommandFromApiJsonDeserializer bulkRepaymentCommandFromApiJsonDeserializer;
     private final CollectionSheetBulkDisbursalCommandFromApiJsonDeserializer bulkDisbursalCommandFromApiJsonDeserializer;
     private final CollectionSheetTransactionDataValidator transactionDataValidator;
-    private final MeetingWritePlatformService meetingWritePlatformService;
     private final DepositAccountAssembler accountAssembler;
     private final DepositAccountWritePlatformService accountWritePlatformService;
-    private final PaymentDetailAssembler paymentDetailAssembler;
     private final PaymentDetailWritePlatformService paymentDetailWritePlatformService;
-
-    @Autowired
-    public CollectionSheetWritePlatformServiceJpaRepositoryImpl(final LoanWritePlatformService loanWritePlatformService,
-            final CollectionSheetBulkRepaymentCommandFromApiJsonDeserializer bulkRepaymentCommandFromApiJsonDeserializer,
-            final CollectionSheetBulkDisbursalCommandFromApiJsonDeserializer bulkDisbursalCommandFromApiJsonDeserializer,
-            final CollectionSheetTransactionDataValidator transactionDataValidator,
-            final MeetingWritePlatformService meetingWritePlatformService, final DepositAccountAssembler accountAssembler,
-            final DepositAccountWritePlatformService accountWritePlatformService, final PaymentDetailAssembler paymentDetailAssembler,
-            final PaymentDetailWritePlatformService paymentDetailWritePlatformService) {
-        this.loanWritePlatformService = loanWritePlatformService;
-        this.bulkRepaymentCommandFromApiJsonDeserializer = bulkRepaymentCommandFromApiJsonDeserializer;
-        this.bulkDisbursalCommandFromApiJsonDeserializer = bulkDisbursalCommandFromApiJsonDeserializer;
-        this.transactionDataValidator = transactionDataValidator;
-        this.meetingWritePlatformService = meetingWritePlatformService;
-        this.accountAssembler = accountAssembler;
-        this.accountWritePlatformService = accountWritePlatformService;
-        this.paymentDetailAssembler = paymentDetailAssembler;
-        this.paymentDetailWritePlatformService = paymentDetailWritePlatformService;
-    }
+    private final TransactionBoundApplicationEventPublisher eventPublisher;
 
     @Override
     public CommandProcessingResult updateCollectionSheet(final JsonCommand command) {
@@ -91,19 +75,22 @@ public class CollectionSheetWritePlatformServiceJpaRepositoryImpl implements Col
         }
 
         final PaymentDetail paymentDetail = this.paymentDetailWritePlatformService.createAndPersistPaymentDetail(command, changes);
-        changes.putAll(updateBulkReapayments(command, paymentDetail));
+        changes.putAll(updateBulkRepayments(command, paymentDetail));
 
         changes.putAll(updateBulkDisbursals(command));
 
         changes.putAll(updateBulkMandatorySavingsDuePayments(command, paymentDetail));
 
-        this.meetingWritePlatformService.updateCollectionSheetAttendance(command);
+        // TODO: send type safe event one day when we refactor this module
+        eventPublisher.publishEvent(command);
 
         return new CommandProcessingResultBuilder() //
                 .withCommandId(command.commandId()) //
                 .withEntityId(command.entityId()) //
                 .withGroupId(command.entityId()) //
-                .with(changes).with(changes).build();
+                .with(changes) //
+                .with(changes) //
+                .build();
     }
 
     @Override
@@ -122,7 +109,7 @@ public class CollectionSheetWritePlatformServiceJpaRepositoryImpl implements Col
 
         final PaymentDetail paymentDetail = null;
 
-        changes.putAll(updateBulkReapayments(command, paymentDetail));
+        changes.putAll(updateBulkRepayments(command, paymentDetail));
 
         changes.putAll(updateBulkDisbursals(command));
 
@@ -132,10 +119,12 @@ public class CollectionSheetWritePlatformServiceJpaRepositoryImpl implements Col
                 .withCommandId(command.commandId()) //
                 .withEntityId(command.entityId()) //
                 .withGroupId(command.entityId()) //
-                .with(changes).with(changes).build();
+                .with(changes) //
+                .with(changes) //
+                .build();
     }
 
-    private Map<String, Object> updateBulkReapayments(final JsonCommand command, final PaymentDetail paymentDetail) {
+    private Map<String, Object> updateBulkRepayments(final JsonCommand command, final PaymentDetail paymentDetail) {
         final Map<String, Object> changes = new HashMap<>();
         final CollectionSheetBulkRepaymentCommand bulkRepaymentCommand = this.bulkRepaymentCommandFromApiJsonDeserializer
                 .commandFromApiJson(command.json(), paymentDetail);
@@ -168,5 +157,4 @@ public class CollectionSheetWritePlatformServiceJpaRepositoryImpl implements Col
         changes.put("SavingsTransactions", depositTransactionIds);
         return changes;
     }
-
 }

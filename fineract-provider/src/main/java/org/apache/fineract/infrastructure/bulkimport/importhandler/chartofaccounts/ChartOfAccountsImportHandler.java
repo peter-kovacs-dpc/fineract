@@ -23,17 +23,19 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import org.apache.fineract.accounting.glaccount.data.GLAccountData;
 import org.apache.fineract.accounting.glaccount.domain.GLAccount;
 import org.apache.fineract.accounting.glaccount.domain.GLAccountRepositoryWrapper;
 import org.apache.fineract.accounting.glaccount.domain.GLAccountType;
 import org.apache.fineract.accounting.glaccount.domain.GLAccountUsage;
+import org.apache.fineract.accounting.glaccount.exception.GLAccountNotFoundException;
 import org.apache.fineract.accounting.journalentry.data.CreditDebit;
 import org.apache.fineract.accounting.journalentry.data.JournalEntryData;
 import org.apache.fineract.commands.domain.CommandWrapper;
 import org.apache.fineract.commands.service.CommandWrapperBuilder;
 import org.apache.fineract.commands.service.PortfolioCommandSourceWritePlatformService;
-import org.apache.fineract.infrastructure.bulkimport.constants.ChartOfAcountsConstants;
+import org.apache.fineract.infrastructure.bulkimport.constants.ChartOfAccountsConstants;
 import org.apache.fineract.infrastructure.bulkimport.constants.TemplatePopulateImportConstants;
 import org.apache.fineract.infrastructure.bulkimport.data.Count;
 import org.apache.fineract.infrastructure.bulkimport.importhandler.ImportHandler;
@@ -43,7 +45,6 @@ import org.apache.fineract.infrastructure.bulkimport.importhandler.helper.Curren
 import org.apache.fineract.infrastructure.bulkimport.importhandler.helper.DateSerializer;
 import org.apache.fineract.infrastructure.bulkimport.importhandler.helper.EnumOptionDataIdSerializer;
 import org.apache.fineract.infrastructure.codes.data.CodeValueData;
-import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.EnumOptionData;
 import org.apache.fineract.infrastructure.core.serialization.GoogleGsonSerializerHelper;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
@@ -62,16 +63,6 @@ import org.springframework.stereotype.Service;
 public class ChartOfAccountsImportHandler implements ImportHandler {
 
     private static final Logger LOG = LoggerFactory.getLogger(ChartOfAccountsImportHandler.class);
-    private List<GLAccountData> glAccounts;
-    private Workbook workbook;
-    private LocalDate transactionDate;
-
-    // for opening bal
-    int flagForOpBal = 0;
-    private List<JournalEntryData> gltransaction;
-    List<CreditDebit> credits = new ArrayList<>();
-    List<CreditDebit> debits = new ArrayList<>();
-    String locale;
 
     private final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService;
     private final GLAccountRepositoryWrapper glAccountRepository;
@@ -84,37 +75,43 @@ public class ChartOfAccountsImportHandler implements ImportHandler {
     }
 
     @Override
-    public Count process(Workbook workbook, String locale, String dateFormat) {
-        this.glAccounts = new ArrayList<>();
-        this.workbook = workbook;
+    public Count process(final Workbook workbook, final String locale, final String dateFormat) {
+        List<GLAccountData> glAccounts = new ArrayList<>();
         // for opening bal
-        gltransaction = new ArrayList<>();
-        credits = new ArrayList<>();
-        debits = new ArrayList<>();
-        this.locale = locale;
+        List<JournalEntryData> glTransactions = new ArrayList<>();
+        List<CreditDebit> credits = new ArrayList<>();
+        List<CreditDebit> debits = new ArrayList<>();
 
-        readExcelFile();
-        return importEntity(dateFormat);
+        boolean flagForOpBal = readExcelFile(workbook, glAccounts);
+        return importEntity(workbook, glAccounts, glTransactions, credits, debits, flagForOpBal, locale, dateFormat);
     }
 
-    private void readExcelFile() {
+    private boolean readExcelFile(final Workbook workbook, final List<GLAccountData> glAccounts) {
         Sheet chartOfAccountsSheet = workbook.getSheet(TemplatePopulateImportConstants.CHART_OF_ACCOUNTS_SHEET_NAME);
         Integer noOfEntries = ImportHandlerUtils.getNumberOfRows(chartOfAccountsSheet, TemplatePopulateImportConstants.FIRST_COLUMN_INDEX);
+        boolean flagForOpBal = false;
         for (int rowIndex = 1; rowIndex <= noOfEntries; rowIndex++) {
             Row row;
             row = chartOfAccountsSheet.getRow(rowIndex);
-            if (ImportHandlerUtils.isNotImported(row, ChartOfAcountsConstants.STATUS_COL)) {
+            if (ImportHandlerUtils.isNotImported(row, ChartOfAccountsConstants.STATUS_COL)) {
                 glAccounts.add(readGlAccounts(row));
+                if (ImportHandlerUtils.readAsString(ChartOfAccountsConstants.OFFICE_COL, row) != null) {
+                    flagForOpBal = Boolean.TRUE;
+                } else {
+                    flagForOpBal = Boolean.FALSE;
+                }
             }
         }
+
+        return flagForOpBal;
     }
 
-    private GLAccountData readGlAccounts(Row row) {
+    private GLAccountData readGlAccounts(final Row row) {
 
-        String accountType = ImportHandlerUtils.readAsString(ChartOfAcountsConstants.ACCOUNT_TYPE_COL, row);
+        String accountType = ImportHandlerUtils.readAsString(ChartOfAccountsConstants.ACCOUNT_TYPE_COL, row);
         EnumOptionData accountTypeEnum = GLAccountType.fromString(accountType);
-        String accountName = ImportHandlerUtils.readAsString(ChartOfAcountsConstants.ACCOUNT_NAME_COL, row);
-        String usage = ImportHandlerUtils.readAsString(ChartOfAcountsConstants.ACCOUNT_USAGE_COL, row);
+        String accountName = ImportHandlerUtils.readAsString(ChartOfAccountsConstants.ACCOUNT_NAME_COL, row);
+        String usage = ImportHandlerUtils.readAsString(ChartOfAccountsConstants.ACCOUNT_USAGE_COL, row);
         Long usageId = null;
         EnumOptionData usageEnum = null;
         if (usage != null && usage.equals(GLAccountUsage.DETAIL.toString())) {
@@ -124,35 +121,34 @@ public class ChartOfAccountsImportHandler implements ImportHandler {
             usageId = 2L;
             usageEnum = new EnumOptionData(usageId, null, null);
         }
-        Boolean manualEntriesAllowed = ImportHandlerUtils.readAsBoolean(ChartOfAcountsConstants.MANUAL_ENTRIES_ALLOWED_COL, row);
+        Boolean manualEntriesAllowed = ImportHandlerUtils.readAsBoolean(ChartOfAccountsConstants.MANUAL_ENTRIES_ALLOWED_COL, row);
         Long parentId = null;
-        if (ImportHandlerUtils.readAsString(ChartOfAcountsConstants.PARENT_ID_COL, row) != null) {
-            parentId = Long.parseLong(ImportHandlerUtils.readAsString(ChartOfAcountsConstants.PARENT_ID_COL, row));
+        if (ImportHandlerUtils.readAsString(ChartOfAccountsConstants.PARENT_ID_COL, row) != null) {
+            parentId = Long.parseLong(Objects.requireNonNull(ImportHandlerUtils.readAsString(ChartOfAccountsConstants.PARENT_ID_COL, row)));
         }
-        String glCode = ImportHandlerUtils.readAsString(ChartOfAcountsConstants.GL_CODE_COL, row);
+        String glCode = ImportHandlerUtils.readAsString(ChartOfAccountsConstants.GL_CODE_COL, row);
         Long tagId = null;
         CodeValueData tagIdCodeValueData = null;
-        if (ImportHandlerUtils.readAsString(ChartOfAcountsConstants.TAG_ID_COL, row) != null) {
-            tagId = Long.parseLong(ImportHandlerUtils.readAsString(ChartOfAcountsConstants.TAG_ID_COL, row));
-            tagIdCodeValueData = new CodeValueData(tagId);
+        if (ImportHandlerUtils.readAsString(ChartOfAccountsConstants.TAG_ID_COL, row) != null
+                && !ImportHandlerUtils.readAsString(ChartOfAccountsConstants.TAG_ID_COL, row).equals("0")) {
+            tagId = Long.parseLong(Objects.requireNonNull(ImportHandlerUtils.readAsString(ChartOfAccountsConstants.TAG_ID_COL, row)));
+            tagIdCodeValueData = new CodeValueData().setId(tagId);
         }
-        String description = ImportHandlerUtils.readAsString(ChartOfAcountsConstants.DESCRIPTION_COL, row);
-        if (ImportHandlerUtils.readAsString(ChartOfAcountsConstants.OFFICE_COL, row) != null) {
-            flagForOpBal = 1;
-        } else {
-            flagForOpBal = 0;
-        }
-        return GLAccountData.importInstance(accountName, parentId, glCode, manualEntriesAllowed, accountTypeEnum, usageEnum, description,
-                tagIdCodeValueData, row.getRowNum());
+        String description = ImportHandlerUtils.readAsString(ChartOfAccountsConstants.DESCRIPTION_COL, row);
+        return new GLAccountData().setName(accountName).setParentId(parentId).setGlCode(glCode)
+                .setManualEntriesAllowed(manualEntriesAllowed).setType(accountTypeEnum).setUsage(usageEnum).setDescription(description)
+                .setTagId(tagIdCodeValueData).setRowIndex(row.getRowNum());
     }
 
-    public Count importEntity(String dateFormat) {
+    private Count importEntity(final Workbook workbook, final List<GLAccountData> glAccounts, final List<JournalEntryData> glTransactions,
+            final List<CreditDebit> credits, final List<CreditDebit> debits, final boolean flagForOpBal, final String locale,
+            final String dateFormat) {
         Sheet chartOfAccountsSheet = workbook.getSheet(TemplatePopulateImportConstants.CHART_OF_ACCOUNTS_SHEET_NAME);
 
         GsonBuilder gsonBuilder = GoogleGsonSerializerHelper.createGsonBuilder();
         gsonBuilder.registerTypeAdapter(EnumOptionData.class, new EnumOptionDataIdSerializer());
         gsonBuilder.registerTypeAdapter(CodeValueData.class, new CodeValueDataIdSerializer());
-        gsonBuilder.registerTypeAdapter(LocalDate.class, new DateSerializer(dateFormat));
+        gsonBuilder.registerTypeAdapter(LocalDate.class, new DateSerializer(dateFormat, locale));
         gsonBuilder.registerTypeAdapter(CurrencyData.class, new CurrencyDateCodeSerializer());
         int successCount = 0;
         int errorCount = 0;
@@ -166,9 +162,9 @@ public class ChartOfAccountsImportHandler implements ImportHandler {
                             .createGLAccount() //
                             .withJson(payload) //
                             .build(); //
-                    final CommandProcessingResult result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
+                    commandsSourceWritePlatformService.logCommandSource(commandRequest);
                     successCount++;
-                    Cell statusCell = chartOfAccountsSheet.getRow(glAccount.getRowIndex()).createCell(ChartOfAcountsConstants.STATUS_COL);
+                    Cell statusCell = chartOfAccountsSheet.getRow(glAccount.getRowIndex()).createCell(ChartOfAccountsConstants.STATUS_COL);
                     statusCell.setCellValue(TemplatePopulateImportConstants.STATUS_CELL_IMPORTED);
                     statusCell.setCellStyle(ImportHandlerUtils.getCellStyle(workbook, IndexedColors.LIGHT_GREEN));
                 } catch (RuntimeException ex) {
@@ -176,39 +172,38 @@ public class ChartOfAccountsImportHandler implements ImportHandler {
                     LOG.error("Problem occurred in importEntity function", ex);
                     errorMessage = ImportHandlerUtils.getErrorMessage(ex);
                     ImportHandlerUtils.writeErrorMessage(chartOfAccountsSheet, glAccount.getRowIndex(), errorMessage,
-                            ChartOfAcountsConstants.STATUS_COL);
+                            ChartOfAccountsConstants.STATUS_COL);
                 }
             }
-            if (flagForOpBal > 0) {
-
+            if (flagForOpBal) {
                 try {
-                    readExcelFileForOpBal(locale, dateFormat);
-                    JournalEntryData transaction = gltransaction.get(gltransaction.size() - 1);
+                    readExcelFileForOpBal(workbook, glTransactions, credits, debits, locale, dateFormat);
+                    JournalEntryData transaction = glTransactions.get(glTransactions.size() - 1);
                     String payload = gsonBuilder.create().toJson(transaction);
 
                     final CommandWrapper commandRequest = new CommandWrapperBuilder().defineOpeningBalanceForJournalEntry()
                             .withJson(payload).build();
-                    final CommandProcessingResult result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
+                    commandsSourceWritePlatformService.logCommandSource(commandRequest);
                     successCount++;
-                    Cell statusCell = chartOfAccountsSheet.getRow(1).createCell(ChartOfAcountsConstants.STATUS_COL);
+                    Cell statusCell = chartOfAccountsSheet.getRow(1).createCell(ChartOfAccountsConstants.STATUS_COL);
                     statusCell.setCellValue(TemplatePopulateImportConstants.STATUS_CELL_IMPORTED);
                     statusCell.setCellStyle(ImportHandlerUtils.getCellStyle(workbook, IndexedColors.LIGHT_GREEN));
                 } catch (RuntimeException ex) {
                     errorCount++;
                     LOG.error("Problem occurred in importEntity function", ex);
                     errorMessage = ImportHandlerUtils.getErrorMessage(ex);
-                    ImportHandlerUtils.writeErrorMessage(chartOfAccountsSheet, 1, errorMessage, ChartOfAcountsConstants.STATUS_COL);
+                    ImportHandlerUtils.writeErrorMessage(chartOfAccountsSheet, 1, errorMessage, ChartOfAccountsConstants.STATUS_COL);
                 }
             }
-            chartOfAccountsSheet.setColumnWidth(ChartOfAcountsConstants.STATUS_COL, TemplatePopulateImportConstants.SMALL_COL_SIZE);
-            ImportHandlerUtils.writeString(ChartOfAcountsConstants.STATUS_COL,
+            chartOfAccountsSheet.setColumnWidth(ChartOfAccountsConstants.STATUS_COL, TemplatePopulateImportConstants.SMALL_COL_SIZE);
+            ImportHandlerUtils.writeString(ChartOfAccountsConstants.STATUS_COL,
                     chartOfAccountsSheet.getRow(TemplatePopulateImportConstants.ROWHEADER_INDEX),
                     TemplatePopulateImportConstants.STATUS_COLUMN_HEADER);
             return Count.instance(successCount, errorCount);
         }
 
-        chartOfAccountsSheet.setColumnWidth(ChartOfAcountsConstants.STATUS_COL, TemplatePopulateImportConstants.SMALL_COL_SIZE);
-        ImportHandlerUtils.writeString(ChartOfAcountsConstants.STATUS_COL,
+        chartOfAccountsSheet.setColumnWidth(ChartOfAccountsConstants.STATUS_COL, TemplatePopulateImportConstants.SMALL_COL_SIZE);
+        ImportHandlerUtils.writeString(ChartOfAccountsConstants.STATUS_COL,
                 chartOfAccountsSheet.getRow(TemplatePopulateImportConstants.ROWHEADER_INDEX),
                 TemplatePopulateImportConstants.STATUS_COLUMN_HEADER);
         return Count.instance(successCount, errorCount);
@@ -216,7 +211,8 @@ public class ChartOfAccountsImportHandler implements ImportHandler {
     }
 
     // for opening balance
-    public void readExcelFileForOpBal(final String locale, final String dateFormat) {
+    private void readExcelFileForOpBal(final Workbook workbook, final List<JournalEntryData> glTransactions,
+            final List<CreditDebit> credits, final List<CreditDebit> debits, final String locale, final String dateFormat) {
 
         Sheet chartOfAccountsSheet = workbook.getSheet(TemplatePopulateImportConstants.CHART_OF_ACCOUNTS_SHEET_NAME);
         Integer noOfEntries = ImportHandlerUtils.getNumberOfRows(chartOfAccountsSheet, TemplatePopulateImportConstants.FIRST_COLUMN_INDEX);
@@ -225,27 +221,27 @@ public class ChartOfAccountsImportHandler implements ImportHandler {
             row = chartOfAccountsSheet.getRow(rowIndex);
 
             //
-            JournalEntryData journalEntry = null;
-            journalEntry = readAddJournalEntries(row, locale, dateFormat);
-            gltransaction.add(journalEntry);
+            JournalEntryData journalEntry;
+            journalEntry = readAddJournalEntries(row, credits, debits, locale, dateFormat);
+            glTransactions.add(journalEntry);
         }
 
     }
 
     // for opening balance
-    private JournalEntryData readAddJournalEntries(Row row, String locale, String dateFormat) {
-        transactionDate = DateUtils.getBusinessLocalDate();
+    private JournalEntryData readAddJournalEntries(final Row row, final List<CreditDebit> credits, final List<CreditDebit> debits,
+            final String locale, String dateFormat) {
+        LocalDate transactionDate = DateUtils.getBusinessLocalDate();
 
-        String officeName = ImportHandlerUtils.readAsString(ChartOfAcountsConstants.OFFICE_COL, row);
-        Long officeId = ImportHandlerUtils.readAsLong(ChartOfAcountsConstants.OFFICE_COL_ID, row);
+        Long officeId = ImportHandlerUtils.readAsLong(ChartOfAccountsConstants.OFFICE_COL_ID, row);
 
-        String currencyCode = ImportHandlerUtils.readAsString(ChartOfAcountsConstants.CURRENCY_CODE, row);
-        String accountToBeDebitedCredited = ImportHandlerUtils.readAsString(ChartOfAcountsConstants.ACCOUNT_NAME_COL, row);
-        String glCode = ImportHandlerUtils.readAsString(ChartOfAcountsConstants.GL_CODE_COL, row);
+        String currencyCode = ImportHandlerUtils.readAsString(ChartOfAccountsConstants.CURRENCY_CODE, row);
+        String accountToBeDebitedCredited = ImportHandlerUtils.readAsString(ChartOfAccountsConstants.ACCOUNT_NAME_COL, row);
+        String glCode = ImportHandlerUtils.readAsString(ChartOfAccountsConstants.GL_CODE_COL, row);
         GLAccount glAccount = this.glAccountRepository.findOneByGlCodeWithNotFoundDetection(glCode);
         Long glAccountIdToDebitedCredited = glAccount.getId();
         if (glAccountIdToDebitedCredited == null) {
-            throw new RuntimeException("Account does not exist");
+            throw new GLAccountNotFoundException("Account does not exist");
         }
 
         // String credit =
@@ -254,13 +250,13 @@ public class ChartOfAccountsImportHandler implements ImportHandler {
         // readAsString(JournalEntryConstants.GL_ACCOUNT_ID_DEBIT_COL, row);
 
         if (accountToBeDebitedCredited != null) {
-            if (ImportHandlerUtils.readAsLong(ChartOfAcountsConstants.CREDIT_AMOUNT, row) != null) {
+            if (ImportHandlerUtils.readAsLong(ChartOfAccountsConstants.CREDIT_AMOUNT, row) != null) {
                 credits.add(new CreditDebit(glAccountIdToDebitedCredited,
-                        BigDecimal.valueOf(ImportHandlerUtils.readAsLong(ChartOfAcountsConstants.CREDIT_AMOUNT, row))));
+                        BigDecimal.valueOf(ImportHandlerUtils.readAsLong(ChartOfAccountsConstants.CREDIT_AMOUNT, row))));
 
-            } else if (ImportHandlerUtils.readAsLong(ChartOfAcountsConstants.DEBIT_AMOUNT, row) != null) {
+            } else if (ImportHandlerUtils.readAsLong(ChartOfAccountsConstants.DEBIT_AMOUNT, row) != null) {
                 debits.add(new CreditDebit(glAccountIdToDebitedCredited,
-                        BigDecimal.valueOf(ImportHandlerUtils.readAsLong(ChartOfAcountsConstants.DEBIT_AMOUNT, row))));
+                        BigDecimal.valueOf(ImportHandlerUtils.readAsLong(ChartOfAccountsConstants.DEBIT_AMOUNT, row))));
             }
         }
 

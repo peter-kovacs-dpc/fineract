@@ -18,68 +18,30 @@
  */
 package org.apache.fineract.cob.loan;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.fineract.cob.domain.LoanAccountLock;
-import org.apache.fineract.cob.domain.LoanAccountLockRepository;
+import org.apache.fineract.cob.COBConstant;
 import org.apache.fineract.cob.domain.LockOwner;
-import org.jetbrains.annotations.NotNull;
-import org.springframework.batch.core.StepContribution;
-import org.springframework.batch.core.scope.context.ChunkContext;
-import org.springframework.batch.core.step.tasklet.Tasklet;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.batch.repeat.RepeatStatus;
+import org.apache.fineract.cob.domain.LockingService;
+import org.apache.fineract.cob.service.RetrieveIdService;
+import org.apache.fineract.cob.tasklet.ApplyCommonLockTasklet;
+import org.apache.fineract.infrastructure.core.config.FineractProperties;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Slf4j
-@RequiredArgsConstructor
-public class ApplyLoanLockTasklet implements Tasklet {
+public class ApplyLoanLockTasklet extends ApplyCommonLockTasklet {
 
-    private final LoanAccountLockRepository accountLockRepository;
-
-    @Override
-    public RepeatStatus execute(@NotNull StepContribution contribution, @NotNull ChunkContext chunkContext) throws Exception {
-        ExecutionContext executionContext = contribution.getStepExecution().getExecutionContext();
-        List<Long> loanIds = (List<Long>) executionContext.get(LoanCOBConstant.LOAN_IDS);
-        List<Long> remainingLoanIds = new ArrayList<>(loanIds);
-
-        List<LoanAccountLock> accountLocks = accountLockRepository.findAllByLoanIdIn(remainingLoanIds);
-
-        List<Long> alreadyHardLockedAccountIds = accountLocks.stream()
-                .filter(e -> LockOwner.LOAN_COB_CHUNK_PROCESSING.equals(e.getLockOwner())).map(LoanAccountLock::getLoanId).toList();
-
-        List<Long> alreadyUnderProcessingAccountIds = accountLocks.stream()
-                .filter(e -> LockOwner.LOAN_INLINE_COB_PROCESSING.equals(e.getLockOwner())).map(LoanAccountLock::getLoanId).toList();
-
-        Map<Long, LoanAccountLock> alreadySoftLockedAccountsMap = accountLocks.stream()
-                .filter(e -> LockOwner.LOAN_COB_PARTITIONING.equals(e.getLockOwner()))
-                .collect(Collectors.toMap(LoanAccountLock::getLoanId, Function.identity()));
-
-        remainingLoanIds.removeAll(alreadyHardLockedAccountIds);
-        remainingLoanIds.removeAll(alreadyUnderProcessingAccountIds);
-
-        for (Long loanId : remainingLoanIds) {
-            LoanAccountLock loanAccountLock = addLock(loanId, alreadySoftLockedAccountsMap);
-            accountLockRepository.save(loanAccountLock);
-        }
-
-        executionContext.put(LoanCOBConstant.ALREADY_LOCKED_LOAN_IDS, new ArrayList<>(alreadyUnderProcessingAccountIds));
-        return RepeatStatus.FINISHED;
+    public ApplyLoanLockTasklet(FineractProperties fineractProperties, LockingService loanLockingService,
+            RetrieveIdService retrieveIdService, TransactionTemplate requiresNewTransactionJdbcTemplate) {
+        super(fineractProperties, loanLockingService, retrieveIdService, requiresNewTransactionJdbcTemplate);
     }
 
-    private LoanAccountLock addLock(Long loanId, Map<Long, LoanAccountLock> alreadySoftLockedAccountsMap) {
-        LoanAccountLock loanAccountLock;
-        if (alreadySoftLockedAccountsMap.containsKey(loanId)) {
-            // Upgrade lock
-            loanAccountLock = alreadySoftLockedAccountsMap.get(loanId);
-            loanAccountLock.setNewLockOwner(LockOwner.LOAN_COB_CHUNK_PROCESSING);
-        } else {
-            loanAccountLock = new LoanAccountLock(loanId, LockOwner.LOAN_COB_CHUNK_PROCESSING);
-        }
-        return loanAccountLock;
+    @Override
+    public String getCOBParameter() {
+        return COBConstant.COB_PARAMETER;
+    }
+
+    @Override
+    public LockOwner getLockOwner() {
+        return LockOwner.LOAN_COB_CHUNK_PROCESSING;
     }
 }

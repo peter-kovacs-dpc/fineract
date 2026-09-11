@@ -22,64 +22,59 @@ import com.google.gson.GsonBuilder;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.fineract.commands.domain.CommandWrapper;
-import org.apache.fineract.commands.service.CommandWrapperBuilder;
-import org.apache.fineract.commands.service.PortfolioCommandSourceWritePlatformService;
+import java.util.function.Supplier;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.fineract.command.core.CommandDispatcher;
 import org.apache.fineract.infrastructure.bulkimport.constants.StaffConstants;
 import org.apache.fineract.infrastructure.bulkimport.constants.TemplatePopulateImportConstants;
 import org.apache.fineract.infrastructure.bulkimport.data.Count;
 import org.apache.fineract.infrastructure.bulkimport.importhandler.ImportHandler;
 import org.apache.fineract.infrastructure.bulkimport.importhandler.ImportHandlerUtils;
 import org.apache.fineract.infrastructure.bulkimport.importhandler.helper.DateSerializer;
-import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.serialization.GoogleGsonSerializerHelper;
+import org.apache.fineract.organisation.staff.command.StaffCreateCommand;
+import org.apache.fineract.organisation.staff.data.StaffCreateResponse;
 import org.apache.fineract.organisation.staff.data.StaffData;
+import org.apache.fineract.organisation.staff.mapper.StaffDataMapper;
+import org.apache.fineract.organisation.staff.mapper.StaffDateMapper;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.IndexedColors;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+@Slf4j
+@RequiredArgsConstructor
 @Service
 public class StaffImportHandler implements ImportHandler {
 
-    private static final Logger LOG = LoggerFactory.getLogger(StaffImportHandler.class);
-    private List<StaffData> staffList;
-    private Workbook workbook;
-
-    private final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService;
-
-    @Autowired
-    public StaffImportHandler(final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService) {
-        this.commandsSourceWritePlatformService = commandsSourceWritePlatformService;
-    }
+    private final CommandDispatcher dispatcher;
+    private final StaffDataMapper staffDataMapper;
+    private final StaffDateMapper staffDateMapper;
 
     @Override
-    public Count process(Workbook workbook, String locale, String dateFormat) {
-        this.workbook = workbook;
-        this.staffList = new ArrayList<>();
-        readExcelFile(locale, dateFormat);
-        return importEntity(dateFormat);
+    public Count process(final Workbook workbook, final String locale, final String dateFormat) {
+        List<StaffData> staffList = readExcelFile(workbook, locale, dateFormat);
+        return importEntity(workbook, staffList, dateFormat);
     }
 
-    public void readExcelFile(String locale, String dateFormat) {
+    private List<StaffData> readExcelFile(final Workbook workbook, final String locale, final String dateFormat) {
+        List<StaffData> staffList = new ArrayList<>();
         Sheet staffSheet = workbook.getSheet(TemplatePopulateImportConstants.EMPLOYEE_SHEET_NAME);
         Integer noOfEntries = ImportHandlerUtils.getNumberOfRows(staffSheet, TemplatePopulateImportConstants.FIRST_COLUMN_INDEX);
         for (int rowIndex = 1; rowIndex <= noOfEntries; rowIndex++) {
             Row row;
             row = staffSheet.getRow(rowIndex);
             if (ImportHandlerUtils.isNotImported(row, StaffConstants.STATUS_COL)) {
-                staffList.add(readStaff(row, locale, dateFormat));
+                staffList.add(readStaff(workbook, row, locale, dateFormat));
             }
-
         }
+        return staffList;
     }
 
-    private StaffData readStaff(Row row, String locale, String dateFormat) {
+    private StaffData readStaff(final Workbook workbook, final Row row, final String locale, final String dateFormat) {
         String officeName = ImportHandlerUtils.readAsString(StaffConstants.OFFICE_NAME_COL, row);
         Long officeId = ImportHandlerUtils.getIdByName(workbook.getSheet(TemplatePopulateImportConstants.OFFICE_SHEET_NAME), officeName);
         String firstName = ImportHandlerUtils.readAsString(StaffConstants.FIRST_NAME_COL, row);
@@ -93,32 +88,38 @@ public class StaffImportHandler implements ImportHandler {
         String externalId = ImportHandlerUtils.readAsString(StaffConstants.EXTERNAL_ID_COL, row);
         Boolean isActive = ImportHandlerUtils.readAsBoolean(StaffConstants.IS_ACTIVE_COL, row);
 
-        return StaffData.importInstance(externalId, firstName, lastName, mobileNo, officeId, isLoanOfficer, isActive, joinedOnDate,
-                row.getRowNum(), locale, dateFormat);
+        return StaffData.builder().externalId(externalId).firstname(firstName).lastname(lastName).mobileNo(mobileNo).officeId(officeId)
+                .isLoanOfficer(isLoanOfficer).isActive(isActive).joiningDate(joinedOnDate).dateFormat(dateFormat).locale(locale)
+                .rowIndex(row.getRowNum()).build();
     }
 
-    public Count importEntity(String dateFormat) {
+    private Count importEntity(final Workbook workbook, final List<StaffData> staffList, final String dateFormat) {
         Sheet staffSheet = workbook.getSheet(TemplatePopulateImportConstants.EMPLOYEE_SHEET_NAME);
         int successCount = 0;
         int errorCount = 0;
-        String errorMessage = "";
+        String errorMessage;
         GsonBuilder gsonBuilder = GoogleGsonSerializerHelper.createGsonBuilder();
         gsonBuilder.registerTypeAdapter(LocalDate.class, new DateSerializer(dateFormat));
-        for (StaffData staff : staffList) {
+        for (var staff : staffList) {
             try {
-                String payload = gsonBuilder.create().toJson(staff);
-                final CommandWrapper commandRequest = new CommandWrapperBuilder() //
-                        .createStaff()//
-                        .withJson(payload) //
-                        .build(); //
-                final CommandProcessingResult result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
+                final var command = new StaffCreateCommand();
+
+                var request = staffDataMapper.map(staff);
+                request.setJoiningDate(staffDateMapper.map(staff.getJoiningDate(), staff.getDateFormat()));
+
+                command.setPayload(request);
+
+                final Supplier<StaffCreateResponse> response = dispatcher.dispatch(command);
+
+                response.get();
+
                 successCount++;
                 Cell statusCell = staffSheet.getRow(staff.getRowIndex()).createCell(StaffConstants.STATUS_COL);
                 statusCell.setCellValue(TemplatePopulateImportConstants.STATUS_CELL_IMPORTED);
                 statusCell.setCellStyle(ImportHandlerUtils.getCellStyle(workbook, IndexedColors.LIGHT_GREEN));
             } catch (RuntimeException ex) {
                 errorCount++;
-                LOG.error("Problem occurred in importEntity function", ex);
+                log.error("Problem occurred in importEntity function", ex);
                 errorMessage = ImportHandlerUtils.getErrorMessage(ex);
                 ImportHandlerUtils.writeErrorMessage(staffSheet, staff.getRowIndex(), errorMessage, StaffConstants.STATUS_COL);
             }

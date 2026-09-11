@@ -18,10 +18,10 @@
  */
 package org.apache.fineract.infrastructure.hooks.processor;
 
+import static org.apache.fineract.commands.domain.CommandWrapperConstants.ACTION_SEND;
+import static org.apache.fineract.commands.domain.CommandWrapperConstants.ENTITY_SMS;
 import static org.apache.fineract.infrastructure.hooks.api.HookApiConstants.apiKeyName;
 
-import com.fasterxml.jackson.core.JsonParseException;
-import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -31,12 +31,13 @@ import java.util.HashMap;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.apache.fineract.infrastructure.core.domain.FineractContext;
+import org.apache.fineract.infrastructure.hooks.data.HookSmsProviderData;
 import org.apache.fineract.infrastructure.hooks.domain.Hook;
 import org.apache.fineract.infrastructure.hooks.domain.HookConfiguration;
 import org.apache.fineract.infrastructure.hooks.domain.HookConfigurationRepository;
-import org.apache.fineract.infrastructure.hooks.processor.data.SmsProviderData;
 import org.apache.fineract.portfolio.client.domain.Client;
 import org.apache.fineract.portfolio.client.domain.ClientRepositoryWrapper;
+import org.apache.fineract.template.mapper.TemplateMapper;
 import org.apache.fineract.template.service.TemplateMergeService;
 import org.springframework.stereotype.Service;
 import retrofit2.Callback;
@@ -49,18 +50,19 @@ public class TwilioHookProcessor implements HookProcessor {
     private final TemplateMergeService templateMergeService;
     private final ClientRepositoryWrapper clientRepositoryWrapper;
     private final ProcessorHelper processorHelper;
+    private final TemplateMapper templateMapper;
 
     @Override
     public void process(final Hook hook, final String payload, final String entityName, final String actionName,
             final FineractContext context) throws IOException {
 
-        final SmsProviderData smsProviderData = new SmsProviderData(hook.getHookConfig());
+        final HookSmsProviderData smsProviderData = new HookSmsProviderData(hook.getConfig());
 
         sendRequest(smsProviderData, payload, entityName, actionName, hook, context);
     }
 
     @SuppressWarnings("unchecked")
-    private void sendRequest(final SmsProviderData smsProviderData, final String payload, String entityName, String actionName,
+    private void sendRequest(final HookSmsProviderData smsProviderData, final String payload, String entityName, String actionName,
             final Hook hook, final FineractContext context) throws IOException {
 
         final WebHookService service = processorHelper.createWebHookService(smsProviderData.getUrl());
@@ -80,11 +82,11 @@ public class TwilioHookProcessor implements HookProcessor {
         }
 
         if (apiKey != null && !apiKey.equals("")) {
-            JsonObject json = null;
+            JsonObject json;
             if (hook.getUgdTemplate() != null) {
-                entityName = "sms";
-                actionName = "send";
-                json = processUgdTemplate(payload, hook, context.getAuthTokenContext());
+                entityName = ENTITY_SMS;
+                actionName = ACTION_SEND;
+                json = processUgdTemplate(payload, hook);
                 if (json == null) {
                     return;
                 }
@@ -96,8 +98,7 @@ public class TwilioHookProcessor implements HookProcessor {
         }
     }
 
-    private JsonObject processUgdTemplate(final String payload, final Hook hook, final String authToken)
-            throws JsonParseException, JsonMappingException, IOException {
+    private JsonObject processUgdTemplate(final String payload, final Hook hook) throws IOException {
         JsonObject json = null;
         @SuppressWarnings("unchecked")
         final HashMap<String, Object> map = new ObjectMapper().readValue(payload, HashMap.class);
@@ -107,9 +108,8 @@ public class TwilioHookProcessor implements HookProcessor {
             final Client client = this.clientRepositoryWrapper.findOneWithNotFoundDetection(clientId);
             final String mobileNo = client.mobileNo();
             if (mobileNo != null && !mobileNo.isEmpty()) {
-                this.templateMergeService.setAuthToken(authToken);
-                final String compiledMessage = this.templateMergeService.compile(hook.getUgdTemplate(), map).replace("<p>", "")
-                        .replace("</p>", "");
+                final String compiledMessage = this.templateMergeService.compile(templateMapper.map(hook.getUgdTemplate()), map)
+                        .replace("<p>", "").replace("</p>", "");
                 final Map<String, String> jsonMap = new HashMap<>();
                 jsonMap.put("mobileNo", mobileNo);
                 jsonMap.put("message", compiledMessage);

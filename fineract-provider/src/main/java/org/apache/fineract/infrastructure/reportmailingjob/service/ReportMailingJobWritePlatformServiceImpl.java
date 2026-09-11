@@ -25,6 +25,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuilder;
+import org.apache.fineract.infrastructure.core.exception.ErrorHandler;
 import org.apache.fineract.infrastructure.core.exception.PlatformDataIntegrityException;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.infrastructure.dataqueries.domain.Report;
@@ -88,7 +89,9 @@ public class ReportMailingJobWritePlatformServiceImpl implements ReportMailingJo
             // save entity
             this.reportMailingJobRepository.saveAndFlush(reportMailingJob);
 
-            return new CommandProcessingResultBuilder().withCommandId(jsonCommand.commandId()).withEntityId(reportMailingJob.getId())
+            return new CommandProcessingResultBuilder() //
+                    .withCommandId(jsonCommand.commandId()) //
+                    .withEntityId(reportMailingJob.getId()) //
                     .build();
         } catch (final JpaSystemException | DataIntegrityViolationException dve) {
             final Throwable throwable = dve.getMostSpecificCause();
@@ -123,7 +126,7 @@ public class ReportMailingJobWritePlatformServiceImpl implements ReportMailingJo
                 final Report stretchyReport = this.reportRepositoryWrapper.findOneThrowExceptionIfNotFound(stretchyReportId);
 
                 // update the stretchy report
-                reportMailingJob.update(stretchyReport);
+                reportMailingJob.setStretchyReport(stretchyReport);
             }
 
             // check if the recurrence was updated
@@ -146,13 +149,13 @@ public class ReportMailingJobWritePlatformServiceImpl implements ReportMailingJo
                     final LocalDateTime nextRecurringDateTime = this.createNextRecurringDateTime(recurrence, startDateTime);
 
                     // update the next run time property
-                    reportMailingJob.updateNextRunDateTime(nextRecurringDateTime);
+                    reportMailingJob.setNextRunDateTime(nextRecurringDateTime);
 
                     // check if the next run LocalDateTime is not empty and the
                     // recurrence is empty
                 } else if (StringUtils.isBlank(recurrence) && (nextRunDateTime != null)) {
                     // the next run LocalDateTime should be set to null
-                    reportMailingJob.updateNextRunDateTime(null);
+                    reportMailingJob.setNextRunDateTime(null);
                 }
             }
 
@@ -170,7 +173,7 @@ public class ReportMailingJobWritePlatformServiceImpl implements ReportMailingJo
                 }
 
                 // update the next run time property
-                reportMailingJob.updateNextRunDateTime(nextRecurringDateTime);
+                reportMailingJob.setNextRunDateTime(nextRecurringDateTime);
             }
 
             if (!changes.isEmpty()) {
@@ -179,8 +182,11 @@ public class ReportMailingJobWritePlatformServiceImpl implements ReportMailingJo
                 this.reportMailingJobRepository.saveAndFlush(reportMailingJob);
             }
 
-            return new CommandProcessingResultBuilder().withCommandId(jsonCommand.commandId()).withEntityId(reportMailingJob.getId())
-                    .with(changes).build();
+            return new CommandProcessingResultBuilder() //
+                    .withCommandId(jsonCommand.commandId()) //
+                    .withEntityId(reportMailingJob.getId()) //
+                    .with(changes) //
+                    .build();
         } catch (final JpaSystemException | DataIntegrityViolationException dve) {
             final Throwable throwable = dve.getMostSpecificCause();
             handleDataIntegrityIssues(jsonCommand, throwable, dve);
@@ -203,7 +209,9 @@ public class ReportMailingJobWritePlatformServiceImpl implements ReportMailingJo
         // save the report mailing job entity
         this.reportMailingJobRepository.save(reportMailingJob);
 
-        return new CommandProcessingResultBuilder().withEntityId(reportMailingJobId).build();
+        return new CommandProcessingResultBuilder() //
+                .withEntityId(reportMailingJobId) //
+                .build();
     }
 
     /**
@@ -236,16 +244,14 @@ public class ReportMailingJobWritePlatformServiceImpl implements ReportMailingJo
      **/
     private void handleDataIntegrityIssues(final JsonCommand jsonCommand, final Throwable realCause,
             final NonTransientDataAccessException dve) {
-
         if (realCause.getMessage().contains(ReportMailingJobConstants.NAME_PARAM_NAME)) {
             final String name = jsonCommand.stringValueOfParameterNamed(ReportMailingJobConstants.NAME_PARAM_NAME);
             throw new PlatformDataIntegrityException("error.msg.report.mailing.job.duplicate.name",
                     "Report mailing job with name `" + name + "` already exists", ReportMailingJobConstants.NAME_PARAM_NAME, name);
         }
 
-        LOG.error("Error occured.", dve);
-
-        throw new PlatformDataIntegrityException("error.msg.charge.unknown.data.integrity.issue",
+        LOG.error("Error occurred.", dve);
+        throw ErrorHandler.getMappable(dve, "error.msg.charge.unknown.data.integrity.issue",
                 "Unknown data integrity issue with resource: " + realCause.getMessage());
     }
 }

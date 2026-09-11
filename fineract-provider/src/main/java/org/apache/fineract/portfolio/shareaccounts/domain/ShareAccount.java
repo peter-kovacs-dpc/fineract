@@ -18,24 +18,25 @@
  */
 package org.apache.fineract.portfolio.shareaccounts.domain;
 
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Embedded;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.Set;
-import javax.persistence.CascadeType;
-import javax.persistence.Column;
-import javax.persistence.Embedded;
-import javax.persistence.Entity;
-import javax.persistence.EnumType;
-import javax.persistence.Enumerated;
-import javax.persistence.FetchType;
-import javax.persistence.JoinColumn;
-import javax.persistence.ManyToOne;
-import javax.persistence.OneToMany;
-import javax.persistence.Table;
-import javax.persistence.Transient;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.infrastructure.core.domain.AbstractPersistableCustom;
+import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.infrastructure.security.service.RandomPasswordGenerator;
 import org.apache.fineract.organisation.monetary.domain.MonetaryCurrency;
 import org.apache.fineract.portfolio.client.domain.Client;
@@ -46,14 +47,14 @@ import org.apache.fineract.useradministration.domain.AppUser;
 
 @Entity
 @Table(name = "m_share_account")
-public class ShareAccount extends AbstractPersistableCustom {
+public class ShareAccount extends AbstractPersistableCustom<Long> {
 
     @ManyToOne
-    @JoinColumn(name = "client_id", nullable = true)
+    @JoinColumn(name = "client_id")
     private Client client;
 
     @ManyToOne
-    @JoinColumn(name = "product_id", nullable = true)
+    @JoinColumn(name = "product_id")
     private ShareProduct shareProduct;
 
     @Column(name = "status_enum", nullable = false)
@@ -63,42 +64,42 @@ public class ShareAccount extends AbstractPersistableCustom {
     private LocalDate submittedDate;
 
     @ManyToOne(optional = true)
-    @JoinColumn(name = "submitted_userid", nullable = true)
+    @JoinColumn(name = "submitted_userid")
     protected AppUser submittedBy;
 
     @Column(name = "approved_date")
     protected LocalDate approvedDate;
 
     @ManyToOne(optional = true)
-    @JoinColumn(name = "approved_userid", nullable = true)
+    @JoinColumn(name = "approved_userid")
     protected AppUser approvedBy;
 
     @Column(name = "rejected_date")
     protected LocalDate rejectedDate;
 
     @ManyToOne(optional = true)
-    @JoinColumn(name = "rejected_userid", nullable = true)
+    @JoinColumn(name = "rejected_userid")
     protected AppUser rejectedBy;
 
-    @Column(name = "activated_date", nullable = true)
+    @Column(name = "activated_date")
     protected LocalDate activatedDate;
 
     @ManyToOne(optional = true)
-    @JoinColumn(name = "activated_userid", nullable = true)
+    @JoinColumn(name = "activated_userid")
     protected AppUser activatedBy;
 
     @Column(name = "closed_date")
     protected LocalDate closedDate;
 
     @ManyToOne(optional = true)
-    @JoinColumn(name = "closed_userid", nullable = true)
+    @JoinColumn(name = "closed_userid")
     protected AppUser closedBy;
 
     @Column(name = "lastmodified_date")
     protected LocalDateTime modifiedDate;
 
     @ManyToOne(optional = true)
-    @JoinColumn(name = "lastmodifiedby_id", nullable = true)
+    @JoinColumn(name = "lastmodifiedby_id")
     protected AppUser modifiedBy;
 
     @Column(name = "external_id")
@@ -120,7 +121,7 @@ public class ShareAccount extends AbstractPersistableCustom {
     private Boolean allowDividendCalculationForInactiveClients;
 
     @ManyToOne
-    @JoinColumn(name = "savings_account_id", nullable = true)
+    @JoinColumn(name = "savings_account_id")
     private SavingsAccount savingsAccount;
 
     @OneToMany(cascade = CascadeType.ALL, mappedBy = "shareAccount", orphanRemoval = true, fetch = FetchType.EAGER)
@@ -130,14 +131,14 @@ public class ShareAccount extends AbstractPersistableCustom {
     private Integer lockinPeriodFrequency;
 
     @Enumerated(EnumType.ORDINAL)
-    @Column(name = "lockin_period_frequency_enum", nullable = true)
+    @Column(name = "lockin_period_frequency_enum")
     private PeriodFrequencyType lockinPeriodFrequencyType;
 
     @Column(name = "minimum_active_period_frequency")
     private Integer minimumActivePeriodFrequency;
 
     @Enumerated(EnumType.ORDINAL)
-    @Column(name = "minimum_active_period_frequency_enum", nullable = true)
+    @Column(name = "minimum_active_period_frequency_enum")
     private PeriodFrequencyType minimumActivePeriodFrequencyType;
 
     @OneToMany(cascade = CascadeType.ALL, mappedBy = "shareAccount", orphanRemoval = true, fetch = FetchType.EAGER)
@@ -209,7 +210,7 @@ public class ShareAccount extends AbstractPersistableCustom {
 
     public boolean setSubmittedDate(final LocalDate submittedDate) {
         boolean toReturn = false;
-        if (this.submittedDate.compareTo(submittedDate) == 0 ? Boolean.FALSE : Boolean.TRUE) {
+        if (!DateUtils.isEqual(submittedDate, this.submittedDate)) {
             this.submittedDate = submittedDate;
             toReturn = true;
         }
@@ -218,7 +219,7 @@ public class ShareAccount extends AbstractPersistableCustom {
 
     public boolean setApprovedDate(final LocalDate approvedDate) {
         boolean toReturn = false;
-        if (this.approvedDate.compareTo(approvedDate) == 0 ? Boolean.FALSE : Boolean.TRUE) {
+        if (!DateUtils.isEqual(approvedDate, this.approvedDate)) {
             this.approvedDate = approvedDate;
             toReturn = true;
         }
@@ -514,11 +515,11 @@ public class ShareAccount extends AbstractPersistableCustom {
     public ShareAccountTransaction getShareAccountTransaction(final ShareAccountTransaction transaction) {
         ShareAccountTransaction returnTrans = null;
         for (ShareAccountTransaction tran : this.shareAccountTransactions) {
-            if (tran.getPurchasedDate().compareTo(transaction.getPurchasedDate()) == 0 ? Boolean.TRUE
-                    : Boolean.FALSE && tran.getTotalShares().equals(transaction.getTotalShares())
-                            && tran.getPurchasePrice().compareTo(transaction.getPurchasePrice()) == 0 ? Boolean.TRUE
-                                    : Boolean.FALSE && tran.getTransactionStatus().equals(transaction.getTransactionStatus())
-                                            && tran.getTransactionType().equals(transaction.getTransactionType())) {
+            if (DateUtils.isEqual(tran.getPurchasedDate(), transaction.getPurchasedDate())
+                    && tran.getTotalShares().equals(transaction.getTotalShares())
+                    && tran.getPurchasePrice().compareTo(transaction.getPurchasePrice()) == 0
+                    && tran.getTransactionStatus().equals(transaction.getTransactionStatus())
+                    && tran.getTransactionType().equals(transaction.getTransactionType())) {
                 returnTrans = tran;
                 break;
             }

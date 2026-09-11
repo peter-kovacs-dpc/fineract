@@ -23,6 +23,7 @@ import static org.apache.fineract.portfolio.savings.SavingsApiConstants.activate
 import static org.apache.fineract.portfolio.savings.SavingsApiConstants.bankNumberParamName;
 import static org.apache.fineract.portfolio.savings.SavingsApiConstants.checkNumberParamName;
 import static org.apache.fineract.portfolio.savings.SavingsApiConstants.closedOnDateParamName;
+import static org.apache.fineract.portfolio.savings.SavingsApiConstants.externalIdParamName;
 import static org.apache.fineract.portfolio.savings.SavingsApiConstants.lienAllowedParamName;
 import static org.apache.fineract.portfolio.savings.SavingsApiConstants.paymentTypeIdParamName;
 import static org.apache.fineract.portfolio.savings.SavingsApiConstants.receiptNumberParamName;
@@ -37,16 +38,17 @@ import com.google.gson.reflect.TypeToken;
 import java.lang.reflect.Type;
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.BooleanUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.infrastructure.configuration.domain.ConfigurationDomainService;
+import org.apache.fineract.infrastructure.configuration.service.BackdatedTransactionValidationService;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.ApiParameterError;
 import org.apache.fineract.infrastructure.core.data.DataValidatorBuilder;
@@ -56,34 +58,38 @@ import org.apache.fineract.infrastructure.core.serialization.FromJsonHelper;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.portfolio.savings.SavingsApiConstants;
 import org.apache.fineract.portfolio.savings.domain.SavingsAccount;
-import org.apache.fineract.portfolio.savings.domain.SavingsAccountAssembler;
 import org.apache.fineract.portfolio.savings.domain.SavingsAccountSubStatusEnum;
 import org.apache.fineract.portfolio.savings.domain.SavingsAccountTransaction;
 import org.apache.fineract.portfolio.savings.exception.TransactionBeforePivotDateNotAllowed;
 import org.apache.fineract.useradministration.domain.AppUser;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
+@RequiredArgsConstructor
 public class SavingsAccountTransactionDataValidator {
 
+    private static final String IS_BULK_PARAM_NAME = "isBulk";
+    private static final String IS_POST_INTEREST_AS_ON_PARAM_NAME = "isPostInterestAsOn";
+    private static final String POST_INTEREST_MANUAL_OR_AUTOMATIC_PARAM_NAME = "postInterestManualOrAutomatic";
     private final FromJsonHelper fromApiJsonHelper;
     private static final Set<String> SAVINGS_ACCOUNT_HOLD_AMOUNT_REQUEST_DATA_PARAMETERS = new HashSet<>(
             Arrays.asList(transactionDateParamName, SavingsApiConstants.dateFormatParamName, SavingsApiConstants.localeParamName,
-                    transactionAmountParamName, lienAllowedParamName, SavingsApiConstants.reasonForBlockParamName));
+                    transactionAmountParamName, externalIdParamName, lienAllowedParamName, SavingsApiConstants.reasonForBlockParamName));
+    private static final Set<String> SAVINGS_ACCOUNT_RELEASE_AMOUNT_REQUEST_DATA_PARAMETERS = createReleaseAmountRequestDataParameters();
+    private static final Set<String> SAVINGS_ACCOUNT_POST_INTEREST_REQUEST_DATA_PARAMETERS = new HashSet<>(
+            Arrays.asList(SavingsApiConstants.dateFormatParamName, SavingsApiConstants.localeParamName, transactionDateParamName,
+                    externalIdParamName, IS_POST_INTEREST_AS_ON_PARAM_NAME, POST_INTEREST_MANUAL_OR_AUTOMATIC_PARAM_NAME));
     private final ConfigurationDomainService configurationDomainService;
-    private final SavingsAccountAssembler savingAccountAssembler;
+    private final BackdatedTransactionValidationService backdatedTransactionValidationService;
 
-    @Autowired
-    public SavingsAccountTransactionDataValidator(final FromJsonHelper fromApiJsonHelper,
-            final ConfigurationDomainService configurationDomainService, final SavingsAccountAssembler savingAccountAssembler) {
-        this.fromApiJsonHelper = fromApiJsonHelper;
-        this.configurationDomainService = configurationDomainService;
-        this.savingAccountAssembler = savingAccountAssembler;
+    private static Set<String> createReleaseAmountRequestDataParameters() {
+        final Set<String> requestDataParameters = new HashSet<>(SavingsAccountConstant.SAVINGS_ACCOUNT_TRANSACTION_REQUEST_DATA_PARAMETERS);
+        requestDataParameters.add(IS_BULK_PARAM_NAME);
+        return requestDataParameters;
     }
 
     public void validateTransactionWithPivotDate(final LocalDate transactionDate, final SavingsAccount savingsAccount) {
-
+        this.backdatedTransactionValidationService.validateTransactionDate(transactionDate);
         final boolean backdatedTxnsAllowedTill = this.configurationDomainService.retrievePivotDateConfig();
         final boolean isRelaxingDaysConfigOn = this.configurationDomainService.isRelaxingDaysConfigForPivotDateEnabled();
 
@@ -94,14 +100,13 @@ public class SavingsAccountTransactionDataValidator {
             if (isRelaxingDaysConfigOn) {
                 pivotDate = pivotDate.minusDays(this.configurationDomainService.retrieveRelaxingDaysConfigForPivotDate());
             }
-            if (pivotDate.isAfter(transactionDate)) {
+            if (DateUtils.isAfter(pivotDate, transactionDate)) {
                 throw new TransactionBeforePivotDateNotAllowed(transactionDate, pivotDate);
             }
         }
     }
 
     public void validate(final JsonCommand command) {
-
         final String json = command.json();
 
         if (StringUtils.isBlank(json)) {
@@ -123,6 +128,9 @@ public class SavingsAccountTransactionDataValidator {
 
         final BigDecimal transactionAmount = this.fromApiJsonHelper.extractBigDecimalWithLocaleNamed(transactionAmountParamName, element);
         baseDataValidator.reset().parameter(transactionAmountParamName).value(transactionAmount).notNull().positiveAmount();
+
+        final String externalId = this.fromApiJsonHelper.extractStringNamed(externalIdParamName, element);
+        baseDataValidator.reset().parameter(externalIdParamName).value(externalId).ignoreIfNull().notExceedingLengthOf(100);
 
         final Integer paymentType = this.fromApiJsonHelper.extractIntegerWithLocaleNamed(paymentTypeIdParamName, element);
         baseDataValidator.reset().parameter(paymentTypeIdParamName).value(paymentType).notNull();
@@ -236,6 +244,8 @@ public class SavingsAccountTransactionDataValidator {
 
         final BigDecimal amount = this.fromApiJsonHelper.extractBigDecimalWithLocaleNamed(transactionAmountParamName, element);
         baseDataValidator.reset().parameter(transactionAmountParamName).value(amount).notNull().positiveAmount();
+        final String externalId = this.fromApiJsonHelper.extractStringNamed(externalIdParamName, element);
+        baseDataValidator.reset().parameter(externalIdParamName).value(externalId).ignoreIfNull().notExceedingLengthOf(100);
         final LocalDate transactionDate = this.fromApiJsonHelper.extractLocalDateNamed(transactionDateParamName, element);
 
         final String reasonForBlock = this.fromApiJsonHelper.extractStringNamed(SavingsApiConstants.reasonForBlockParamName, element);
@@ -296,7 +306,7 @@ public class SavingsAccountTransactionDataValidator {
         }
 
         // compare two dates now
-        if (lastTransactionDate != null && transactionDate.isBefore(lastTransactionDate)) {
+        if (DateUtils.isBefore(transactionDate, lastTransactionDate)) {
             baseDataValidator.parameter(SavingsApiConstants.dateParamName).value(lastTransactionDate).failWithCode(
                     "validation.msg.date.can.not.be.before.last.transaction.date", "Amount can be put on hold only after last transaction");
         }
@@ -304,8 +314,7 @@ public class SavingsAccountTransactionDataValidator {
         throwExceptionIfValidationWarningsExist(dataValidationErrors);
     }
 
-    public SavingsAccountTransaction validateReleaseAmountAndAssembleForm(final SavingsAccountTransaction holdTransaction,
-            final AppUser createdUser) {
+    public SavingsAccountTransaction validateReleaseAmountAndAssembleForm(final SavingsAccountTransaction holdTransaction) {
         final List<ApiParameterError> dataValidationErrors = new ArrayList<>();
         final DataValidatorBuilder baseDataValidator = new DataValidatorBuilder(dataValidationErrors)
                 .resource(SAVINGS_ACCOUNT_RESOURCE_NAME);
@@ -326,11 +335,61 @@ public class SavingsAccountTransactionDataValidator {
         }
 
         throwExceptionIfValidationWarningsExist(dataValidationErrors);
-        LocalDateTime createdDate = DateUtils.getLocalDateTimeOfSystem();
         LocalDate transactionDate = DateUtils.getBusinessLocalDate();
-        SavingsAccountTransaction transaction = SavingsAccountTransaction.releaseAmount(holdTransaction, transactionDate, createdDate,
-                createdUser);
+        SavingsAccountTransaction transaction = SavingsAccountTransaction.releaseAmount(holdTransaction, transactionDate);
         return transaction;
+    }
+
+    public void validateReleaseAmount(final JsonCommand command) {
+        final String json = command.json();
+        if (StringUtils.isBlank(json)) {
+            throw new InvalidJsonException();
+        }
+
+        final Type typeOfMap = new TypeToken<Map<String, Object>>() {}.getType();
+        this.fromApiJsonHelper.checkForUnsupportedParameters(typeOfMap, json, SAVINGS_ACCOUNT_RELEASE_AMOUNT_REQUEST_DATA_PARAMETERS);
+
+        final List<ApiParameterError> dataValidationErrors = new ArrayList<>();
+        final DataValidatorBuilder baseDataValidator = new DataValidatorBuilder(dataValidationErrors)
+                .resource(SavingsApiConstants.SAVINGS_ACCOUNT_TRANSACTION_RESOURCE_NAME);
+
+        final JsonElement element = command.parsedJson();
+        final String externalId = this.fromApiJsonHelper.extractStringNamed(externalIdParamName, element);
+        baseDataValidator.reset().parameter(externalIdParamName).value(externalId).ignoreIfNull().notExceedingLengthOf(100);
+
+        throwExceptionIfValidationWarningsExist(dataValidationErrors);
+    }
+
+    public void validatePostInterest(final JsonCommand command) {
+        final String json = command.json();
+        if (StringUtils.isBlank(json)) {
+            throw new InvalidJsonException();
+        }
+
+        final Type typeOfMap = new TypeToken<Map<String, Object>>() {}.getType();
+        this.fromApiJsonHelper.checkForUnsupportedParameters(typeOfMap, json, SAVINGS_ACCOUNT_POST_INTEREST_REQUEST_DATA_PARAMETERS);
+
+        final List<ApiParameterError> dataValidationErrors = new ArrayList<>();
+        final DataValidatorBuilder baseDataValidator = new DataValidatorBuilder(dataValidationErrors)
+                .resource(SavingsApiConstants.SAVINGS_ACCOUNT_TRANSACTION_RESOURCE_NAME);
+
+        final JsonElement element = command.parsedJson();
+        final String externalId = this.fromApiJsonHelper.extractStringNamed(externalIdParamName, element);
+        baseDataValidator.reset().parameter(externalIdParamName).value(externalId).ignoreIfNull().notExceedingLengthOf(100);
+
+        if (this.fromApiJsonHelper.parameterExists(IS_POST_INTEREST_AS_ON_PARAM_NAME, element)) {
+            final Boolean isPostInterestAsOn = this.fromApiJsonHelper.extractBooleanNamed(IS_POST_INTEREST_AS_ON_PARAM_NAME, element);
+            baseDataValidator.reset().parameter(IS_POST_INTEREST_AS_ON_PARAM_NAME).value(isPostInterestAsOn).isOneOfTheseValues(true,
+                    false);
+        }
+        if (this.fromApiJsonHelper.parameterExists(POST_INTEREST_MANUAL_OR_AUTOMATIC_PARAM_NAME, element)) {
+            final Boolean postInterestManualOrAutomatic = this.fromApiJsonHelper
+                    .extractBooleanNamed(POST_INTEREST_MANUAL_OR_AUTOMATIC_PARAM_NAME, element);
+            baseDataValidator.reset().parameter(POST_INTEREST_MANUAL_OR_AUTOMATIC_PARAM_NAME).value(postInterestManualOrAutomatic)
+                    .isOneOfTheseValues(true, false);
+        }
+
+        throwExceptionIfValidationWarningsExist(dataValidationErrors);
     }
 
     private void throwExceptionIfValidationWarningsExist(final List<ApiParameterError> dataValidationErrors) {

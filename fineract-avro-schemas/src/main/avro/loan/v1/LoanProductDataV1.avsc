@@ -341,10 +341,10 @@
         },
         {
             "default": null,
-            "name": "transactionProcessingStrategyId",
+            "name": "transactionProcessingStrategyCode",
             "type": [
                 "null",
-                "long"
+                "string"
             ]
         },
         {
@@ -417,6 +417,14 @@
             "type": [
                 "null",
                 "org.apache.fineract.avro.generic.v1.EnumOptionDataV1"
+            ]
+        },
+        {
+            "default": null,
+            "name": "daysInYearCustomStrategy",
+            "type": [
+                "null",
+                "org.apache.fineract.avro.generic.v1.StringEnumOptionDataV1"
             ]
         },
         {
@@ -640,6 +648,25 @@
             "type": [
                 "null",
                 "org.apache.fineract.avro.loan.v1.DelinquencyBucketDataV1"
+            ]
+        },
+        {
+            "default": null,
+            "name": "interestRecognitionOnDisbursementDate",
+            "type": [
+                "null",
+                "boolean"
+            ]
+        },
+        {
+            "default": null,
+            "name": "customData",
+            "type": [
+                "null",
+                {
+                    "values": "bytes",
+                    "type": "map"
+                }
             ]
         }
     ]

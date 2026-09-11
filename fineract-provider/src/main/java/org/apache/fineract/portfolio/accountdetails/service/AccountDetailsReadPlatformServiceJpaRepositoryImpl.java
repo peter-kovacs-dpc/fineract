@@ -24,6 +24,7 @@ import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
+import lombok.AllArgsConstructor;
 import org.apache.fineract.infrastructure.core.data.EnumOptionData;
 import org.apache.fineract.infrastructure.core.domain.JdbcSupport;
 import org.apache.fineract.infrastructure.security.utils.ColumnValidator;
@@ -33,6 +34,7 @@ import org.apache.fineract.portfolio.accountdetails.data.GuarantorAccountSummary
 import org.apache.fineract.portfolio.accountdetails.data.LoanAccountSummaryData;
 import org.apache.fineract.portfolio.accountdetails.data.SavingsAccountSummaryData;
 import org.apache.fineract.portfolio.accountdetails.data.ShareAccountSummaryData;
+import org.apache.fineract.portfolio.accountdetails.data.WorkingCapitalLoanAccountSummaryData;
 import org.apache.fineract.portfolio.client.service.ClientReadPlatformService;
 import org.apache.fineract.portfolio.group.service.GroupReadPlatformService;
 import org.apache.fineract.portfolio.loanaccount.data.LoanApplicationTimelineData;
@@ -45,28 +47,20 @@ import org.apache.fineract.portfolio.savings.service.SavingsEnumerations;
 import org.apache.fineract.portfolio.shareaccounts.data.ShareAccountApplicationTimelineData;
 import org.apache.fineract.portfolio.shareaccounts.data.ShareAccountStatusEnumData;
 import org.apache.fineract.portfolio.shareaccounts.service.SharesEnumerations;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.fineract.portfolio.workingcapitalloan.service.WorkingCapitalLoanApplicationReadPlatformService;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
 
 @Service
+@AllArgsConstructor
 public class AccountDetailsReadPlatformServiceJpaRepositoryImpl implements AccountDetailsReadPlatformService {
 
     private final JdbcTemplate jdbcTemplate;
     private final ClientReadPlatformService clientReadPlatformService;
     private final GroupReadPlatformService groupReadPlatformService;
     private final ColumnValidator columnValidator;
-
-    @Autowired
-    public AccountDetailsReadPlatformServiceJpaRepositoryImpl(final ClientReadPlatformService clientReadPlatformService,
-            final JdbcTemplate jdbcTemplate, final GroupReadPlatformService groupReadPlatformService,
-            final ColumnValidator columnValidator) {
-        this.clientReadPlatformService = clientReadPlatformService;
-        this.jdbcTemplate = jdbcTemplate;
-        this.groupReadPlatformService = groupReadPlatformService;
-        this.columnValidator = columnValidator;
-    }
+    private final WorkingCapitalLoanApplicationReadPlatformService workingCapitalLoanApplicationReadPlatformService;
 
     @Override
     public AccountSummaryCollectionData retrieveClientAccountDetails(final Long clientId) {
@@ -84,11 +78,14 @@ public class AccountDetailsReadPlatformServiceJpaRepositoryImpl implements Accou
 
         final List<LoanAccountSummaryData> glimAccounts = retrieveLoanAccountDetails(glimLoanClause, new Object[] { clientId });
         final List<LoanAccountSummaryData> loanAccounts = retrieveLoanAccountDetails(loanwhereClause, new Object[] { clientId });
+        final List<WorkingCapitalLoanAccountSummaryData> workingCapitalLoanAccounts = workingCapitalLoanApplicationReadPlatformService
+                .retrieveLoanSummaryData(clientId);
         final List<SavingsAccountSummaryData> savingsAccounts = retrieveAccountDetails(savingswhereClause, new Object[] { clientId });
         final List<ShareAccountSummaryData> shareAccounts = retrieveShareAccountDetails(clientId);
         final List<GuarantorAccountSummaryData> guarantorloanAccounts = retrieveGuarantorLoanAccountDetails(guarantorWhereClause,
                 new Object[] { clientId });
-        return new AccountSummaryCollectionData(loanAccounts, glimAccounts, savingsAccounts, shareAccounts, guarantorloanAccounts);
+        return new AccountSummaryCollectionData(loanAccounts, glimAccounts, savingsAccounts, shareAccounts, guarantorloanAccounts,
+                workingCapitalLoanAccounts);
     }
 
     @Override
@@ -320,6 +317,8 @@ public class AccountDetailsReadPlatformServiceJpaRepositoryImpl implements Accou
             accountsSummary.append("sa.id as id, sa.account_no as accountNo, sa.external_id as externalId, sa.status_enum as statusEnum, ");
             accountsSummary.append("sa.account_type_enum as accountType, ");
             accountsSummary.append("sa.account_balance_derived as accountBalance, ");
+            accountsSummary.append("sa.on_hold_funds_derived as onHoldFunds, ");
+            accountsSummary.append("sa.total_savings_amount_on_hold as onHoldAmount, ");
 
             accountsSummary.append("sa.submittedon_date as submittedOnDate,");
             accountsSummary.append("sbu.username as submittedByUsername,");
@@ -386,6 +385,18 @@ public class AccountDetailsReadPlatformServiceJpaRepositoryImpl implements Accou
             final String shortProductName = rs.getString("shortProductName");
             final Integer statusId = JdbcSupport.getInteger(rs, "statusEnum");
             final BigDecimal accountBalance = JdbcSupport.getBigDecimalDefaultToNullIfZero(rs, "accountBalance");
+            final BigDecimal onHoldFunds = JdbcSupport.getBigDecimalDefaultToNullIfZero(rs, "onHoldFunds");
+            final BigDecimal onHoldAmount = JdbcSupport.getBigDecimalDefaultToNullIfZero(rs, "onHoldAmount");
+
+            BigDecimal availableBalance = accountBalance;
+            if (availableBalance != null && onHoldFunds != null) {
+                availableBalance = availableBalance.subtract(onHoldFunds);
+            }
+
+            if (availableBalance != null && onHoldAmount != null) {
+                availableBalance = availableBalance.subtract(onHoldAmount);
+            }
+
             final SavingsAccountStatusEnumData status = SavingsEnumerations.status(statusId);
             final Integer accountType = JdbcSupport.getInteger(rs, "accountType");
             final EnumOptionData accountTypeData = AccountEnumerations.loanType(accountType);
@@ -442,7 +453,8 @@ public class AccountDetailsReadPlatformServiceJpaRepositoryImpl implements Accou
                     activatedByLastname, closedOnDate, closedByUsername, closedByFirstname, closedByLastname);
 
             return new SavingsAccountSummaryData(id, accountNo, externalId, productId, productName, shortProductName, status, currency,
-                    accountBalance, accountTypeData, timeline, depositTypeData, subStatus, lastActiveTransactionDate);
+                    accountBalance, onHoldFunds, onHoldAmount, availableBalance, accountTypeData, timeline, depositTypeData, subStatus,
+                    lastActiveTransactionDate);
         }
     }
 
@@ -461,6 +473,11 @@ public class AccountDetailsReadPlatformServiceJpaRepositoryImpl implements Accou
 
                     .append(" l.loan_product_counter as loanCycle,")
 
+                    .append("l.currency_code as currencyCode, l.currency_digits as currencyDigits, l.currency_multiplesof as inMultiplesOf,")
+
+                    .append("curr.name as currencyName, curr.internationalized_name_code as currencyNameCode,")
+                    .append("curr.display_symbol as currencyDisplaySymbol,")
+
                     .append(" l.submittedon_date as submittedOnDate,")
                     .append(" sbu.username as submittedByUsername, sbu.firstname as submittedByFirstname, sbu.lastname as submittedByLastname,")
 
@@ -476,18 +493,21 @@ public class AccountDetailsReadPlatformServiceJpaRepositoryImpl implements Accou
                     .append(" l.expected_disbursedon_date as expectedDisbursementDate, l.disbursedon_date as actualDisbursementDate,")
                     .append(" dbu.username as disbursedByUsername, dbu.firstname as disbursedByFirstname, dbu.lastname as disbursedByLastname,")
 
-                    .append(" l.closedon_date as closedOnDate,")
+                    .append(" l.closedon_date as closedOnDate, l.overpaidon_date as overpaidOnDate,")
                     .append(" cbu.username as closedByUsername, cbu.firstname as closedByFirstname, cbu.lastname as closedByLastname,")
-                    .append(" la.overdue_since_date_derived as overdueSinceDate,")
-                    .append(" l.writtenoffon_date as writtenOffOnDate, l.expected_maturedon_date as expectedMaturityDate")
-
-                    .append(" from m_loan l ").append("LEFT JOIN m_product_loan AS lp ON lp.id = l.product_id")
+                    .append(" la.overdue_since_date_derived as overdueSinceDate, ")
+                    .append(" l.writtenoffon_date as writtenOffOnDate, l.maturedon_date as actualMaturityDate, l.expected_maturedon_date as expectedMaturityDate, ")
+                    .append(" l.charged_off_on_date as chargedOffOnDate, cobu.username as chargedOffByUsername, ")
+                    .append(" cobu.firstname as chargedOffByFirstname, cobu.lastname as chargedOffByLastname ").append(" from m_loan l ")
+                    .append("LEFT JOIN m_product_loan AS lp ON lp.id = l.product_id")
+                    .append(" left join m_currency curr on curr.code = l.currency_code")
                     .append(" left join m_appuser sbu on sbu.id = l.created_by")
                     .append(" left join m_appuser rbu on rbu.id = l.rejectedon_userid")
                     .append(" left join m_appuser wbu on wbu.id = l.withdrawnon_userid")
                     .append(" left join m_appuser abu on abu.id = l.approvedon_userid")
                     .append(" left join m_appuser dbu on dbu.id = l.disbursedon_userid")
                     .append(" left join m_appuser cbu on cbu.id = l.closedon_userid")
+                    .append(" left join m_appuser cobu on cobu.id = l.charged_off_by_userid")
                     .append(" left join m_loan_arrears_aging la on la.loan_id = l.id")
                     .append(" left join glim_accounts glim on glim.id=l.glim_id");
 
@@ -509,6 +529,15 @@ public class AccountDetailsReadPlatformServiceJpaRepositoryImpl implements Accou
             final Integer loanTypeId = JdbcSupport.getInteger(rs, "loanType");
             final EnumOptionData loanType = AccountEnumerations.loanType(loanTypeId);
             final Integer loanCycle = JdbcSupport.getInteger(rs, "loanCycle");
+
+            final String currencyCode = rs.getString("currencyCode");
+            final String currencyName = rs.getString("currencyName");
+            final String currencyNameCode = rs.getString("currencyNameCode");
+            final String currencyDisplaySymbol = rs.getString("currencyDisplaySymbol");
+            final Integer currencyDigits = JdbcSupport.getInteger(rs, "currencyDigits");
+            final Integer inMultiplesOf = JdbcSupport.getInteger(rs, "inMultiplesOf");
+            final CurrencyData currency = new CurrencyData(currencyCode, currencyName, currencyDigits, inMultiplesOf, currencyDisplaySymbol,
+                    currencyNameCode);
 
             final LocalDate submittedOnDate = JdbcSupport.getLocalDate(rs, "submittedOnDate");
             final String submittedByUsername = rs.getString("submittedByUsername");
@@ -548,22 +577,30 @@ public class AccountDetailsReadPlatformServiceJpaRepositoryImpl implements Accou
             final LocalDate writtenOffOnDate = JdbcSupport.getLocalDate(rs, "writtenOffOnDate");
 
             final LocalDate expectedMaturityDate = JdbcSupport.getLocalDate(rs, "expectedMaturityDate");
+            final LocalDate actualMaturityDate = JdbcSupport.getLocalDate(rs, "actualMaturityDate");
 
             final LocalDate overdueSinceDate = JdbcSupport.getLocalDate(rs, "overdueSinceDate");
-            Boolean inArrears = true;
-            if (overdueSinceDate == null) {
-                inArrears = false;
-            }
+
+            final LocalDate chargedOffOnDate = JdbcSupport.getLocalDate(rs, "chargedOffOnDate");
+            final String chargedOffByUsername = rs.getString("chargedOffByUsername");
+            final String chargedOffByFirstname = rs.getString("chargedOffByFirstname");
+            final String chargedOffByLastname = rs.getString("chargedOffByLastname");
+
+            final LocalDate overpaidOnDate = JdbcSupport.getLocalDate(rs, "overpaidOnDate");
+
+            Boolean inArrears = (overdueSinceDate != null);
 
             final LoanApplicationTimelineData timeline = new LoanApplicationTimelineData(submittedOnDate, submittedByUsername,
                     submittedByFirstname, submittedByLastname, rejectedOnDate, rejectedByUsername, rejectedByFirstname, rejectedByLastname,
                     withdrawnOnDate, withdrawnByUsername, withdrawnByFirstname, withdrawnByLastname, approvedOnDate, approvedByUsername,
                     approvedByFirstname, approvedByLastname, expectedDisbursementDate, actualDisbursementDate, disbursedByUsername,
                     disbursedByFirstname, disbursedByLastname, closedOnDate, closedByUsername, closedByFirstname, closedByLastname,
-                    expectedMaturityDate, writtenOffOnDate, closedByUsername, closedByFirstname, closedByLastname);
+                    actualMaturityDate, expectedMaturityDate, writtenOffOnDate, closedByUsername, closedByFirstname, closedByLastname,
+                    chargedOffOnDate, chargedOffByUsername, chargedOffByFirstname, chargedOffByLastname, overpaidOnDate);
 
             return new LoanAccountSummaryData(id, accountNo, parentAccountNumber, externalId, productId, loanProductName,
-                    shortLoanProductName, loanStatus, loanType, loanCycle, timeline, inArrears, originalLoan, loanBalance, amountPaid);
+                    shortLoanProductName, loanStatus, currency, loanType, loanCycle, timeline, inArrears, originalLoan, loanBalance,
+                    amountPaid);
         }
 
     }
@@ -587,7 +624,7 @@ public class AccountDetailsReadPlatformServiceJpaRepositoryImpl implements Accou
                     .append(" l.approvedon_date as approvedOnDate,")
                     .append(" l.expected_disbursedon_date as expectedDisbursementDate, l.disbursedon_date as actualDisbursementDate,")
                     .append(" l.closedon_date as closedOnDate,").append(" la.overdue_since_date_derived as overdueSinceDate,")
-                    .append(" l.writtenoffon_date as writtenOffOnDate, l.expected_maturedon_date as expectedMaturityDate,")
+                    .append(" l.writtenoffon_date as writtenOffOnDate, l.maturedon_date as actualMaturityDate, l.expected_maturedon_date as expectedMaturityDate,")
                     .append(" g.is_active as isActive,").append(" cv.code_value as relationship,").append(" sa.on_hold_funds_derived")
                     .append(" from m_loan l ").append(" join m_guarantor as g on g.loan_id = l.id ")
                     .append(" join m_client as c on c.id = g.entity_id ").append(" LEFT JOIN m_product_loan AS lp ON lp.id = l.product_id")

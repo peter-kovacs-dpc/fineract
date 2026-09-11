@@ -30,8 +30,6 @@ public class MultiExceptionStepDefinitions implements En {
 
     private List<Throwable> exceptions = new ArrayList<>();
 
-    private MultiException multiException;
-
     public MultiExceptionStepDefinitions() {
         Given("/^A multi exception with exceptions (.*) and (.*)$/", (String exception1, String exception2) -> {
             if (!StringUtils.isBlank(exception1)) {

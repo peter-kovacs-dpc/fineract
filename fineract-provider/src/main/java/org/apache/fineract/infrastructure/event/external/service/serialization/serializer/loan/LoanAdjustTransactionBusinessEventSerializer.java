@@ -18,29 +18,32 @@
  */
 package org.apache.fineract.infrastructure.event.external.service.serialization.serializer.loan;
 
-import java.io.IOException;
-import java.nio.ByteBuffer;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.apache.avro.generic.GenericContainer;
+import org.apache.fineract.avro.generator.ByteBufferSerializable;
 import org.apache.fineract.avro.loan.v1.LoanTransactionAdjustmentDataV1;
 import org.apache.fineract.avro.loan.v1.LoanTransactionDataV1;
 import org.apache.fineract.infrastructure.event.business.domain.BusinessEvent;
 import org.apache.fineract.infrastructure.event.business.domain.loan.LoanAdjustTransactionBusinessEvent;
 import org.apache.fineract.infrastructure.event.external.service.serialization.mapper.loan.LoanTransactionDataMapper;
-import org.apache.fineract.infrastructure.event.external.service.serialization.serializer.BusinessEventSerializer;
-import org.apache.fineract.infrastructure.event.external.service.support.ByteBufferConverter;
+import org.apache.fineract.infrastructure.event.external.service.serialization.serializer.AbstractBusinessEventWithCustomDataSerializer;
+import org.apache.fineract.infrastructure.event.external.service.serialization.serializer.ExternalEventCustomDataSerializer;
 import org.apache.fineract.portfolio.loanaccount.data.LoanTransactionData;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanTransaction;
+import org.apache.fineract.portfolio.loanaccount.service.LoanChargePaidByReadService;
 import org.apache.fineract.portfolio.loanaccount.service.LoanReadPlatformService;
 import org.springframework.stereotype.Component;
 
 @Component
 @RequiredArgsConstructor
-public class LoanAdjustTransactionBusinessEventSerializer implements BusinessEventSerializer {
+public class LoanAdjustTransactionBusinessEventSerializer
+        extends AbstractBusinessEventWithCustomDataSerializer<LoanAdjustTransactionBusinessEvent> {
 
     private final LoanReadPlatformService service;
     private final LoanTransactionDataMapper mapper;
-    private final ByteBufferConverter byteBufferConverter;
+    private final LoanChargePaidByReadService loanChargePaidByReadService;
+    private final List<ExternalEventCustomDataSerializer<LoanAdjustTransactionBusinessEvent>> externalEventCustomDataSerializers;
 
     @Override
     public <T> boolean canSerialize(BusinessEvent<T> event) {
@@ -48,11 +51,13 @@ public class LoanAdjustTransactionBusinessEventSerializer implements BusinessEve
     }
 
     @Override
-    public <T> byte[] serialize(BusinessEvent<T> rawEvent) throws IOException {
+    public <T> ByteBufferSerializable toAvroDTO(BusinessEvent<T> rawEvent) {
         LoanAdjustTransactionBusinessEvent event = (LoanAdjustTransactionBusinessEvent) rawEvent;
         LoanTransaction transactionToAdjust = event.get().getTransactionToAdjust();
         LoanTransactionData transactionToAdjustData = service.retrieveLoanTransaction(transactionToAdjust.getLoan().getId(),
                 transactionToAdjust.getId());
+        transactionToAdjustData
+                .setLoanChargePaidByList(loanChargePaidByReadService.fetchLoanChargesPaidByDataTransactionId(transactionToAdjust.getId()));
         LoanTransactionDataV1 transactionToAdjustAvroDto = mapper.map(transactionToAdjustData);
 
         LoanTransaction newTransactionDetail = event.get().getNewTransactionDetail();
@@ -60,17 +65,21 @@ public class LoanAdjustTransactionBusinessEventSerializer implements BusinessEve
         if (newTransactionDetail != null) {
             LoanTransactionData newTransactionDetailData = service.retrieveLoanTransaction(newTransactionDetail.getLoan().getId(),
                     newTransactionDetail.getId());
+            newTransactionDetailData.setLoanChargePaidByList(
+                    loanChargePaidByReadService.fetchLoanChargesPaidByDataTransactionId(newTransactionDetail.getId()));
             newTransactionDetailAvroDto = mapper.map(newTransactionDetailData);
 
         }
-        LoanTransactionAdjustmentDataV1 avroDto = new LoanTransactionAdjustmentDataV1(transactionToAdjustAvroDto,
-                newTransactionDetailAvroDto);
-        ByteBuffer buffer = avroDto.toByteBuffer();
-        return byteBufferConverter.convert(buffer);
+        return new LoanTransactionAdjustmentDataV1(transactionToAdjustAvroDto, newTransactionDetailAvroDto, collectCustomData(event));
     }
 
     @Override
     public Class<? extends GenericContainer> getSupportedSchema() {
         return LoanTransactionAdjustmentDataV1.class;
+    }
+
+    @Override
+    protected List<ExternalEventCustomDataSerializer<LoanAdjustTransactionBusinessEvent>> getExternalEventCustomDataSerializers() {
+        return externalEventCustomDataSerializers;
     }
 }

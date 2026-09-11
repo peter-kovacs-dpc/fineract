@@ -22,14 +22,15 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import org.apache.fineract.infrastructure.codes.data.CodeValueData;
 import org.apache.fineract.infrastructure.codes.service.CodeValueReadPlatformService;
 import org.apache.fineract.infrastructure.core.domain.JdbcSupport;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
 import org.apache.fineract.portfolio.client.data.ClientFamilyMembersData;
+import org.apache.fineract.portfolio.client.exception.FamilyMemberNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
@@ -83,15 +84,15 @@ public class ClientFamilyMembersReadPlatformServiceImpl implements ClientFamilyM
             final String profession = rs.getString("profession");
             final long professionId = rs.getLong("professionId");
 
-            return ClientFamilyMembersData.instance(id, clientId, firstName, middleName, lastName, qualification, mobileNumber, age,
-                    isDependent, relationship, relationshipId, maritalStatus, maritalStatusId, gender, genderId, dateOfBirth, profession,
-                    professionId);
-
+            return ClientFamilyMembersData.builder().id(id).clientId(clientId).firstName(firstName).middleName(middleName)
+                    .lastName(lastName).qualification(qualification).mobileNumber(mobileNumber).age(age).isDependent(isDependent)
+                    .relationship(relationship).relationshipId(relationshipId).maritalStatus(maritalStatus).maritalStatusId(maritalStatusId)
+                    .gender(gender).genderId(genderId).dateOfBirth(dateOfBirth).profession(profession).professionId(professionId).build();
         }
     }
 
     @Override
-    public Collection<ClientFamilyMembersData> getClientFamilyMembers(long clientId) {
+    public List<ClientFamilyMembersData> getClientFamilyMembers(long clientId) {
 
         this.context.authenticatedUser();
 
@@ -102,14 +103,18 @@ public class ClientFamilyMembersReadPlatformServiceImpl implements ClientFamilyM
     }
 
     @Override
-    public ClientFamilyMembersData getClientFamilyMember(long id) {
+    public ClientFamilyMembersData getClientFamilyMember(long clientId, long familyMemberId) {
 
         this.context.authenticatedUser();
 
         final ClientFamilyMembersMapper rm = new ClientFamilyMembersMapper();
-        final String sql = "select " + rm.schema() + " where fmb.id=? ";
+        final String sql = "select " + rm.schema() + " where fmb.client_id=? and fmb.id=? ";
 
-        return this.jdbcTemplate.queryForObject(sql, rm, id); // NOSONAR
+        try {
+            return this.jdbcTemplate.queryForObject(sql, rm, clientId, familyMemberId); // NOSONAR
+        } catch (final EmptyResultDataAccessException e) {
+            throw new FamilyMemberNotFoundException(familyMemberId, clientId, e);
+        }
     }
 
     @Override
@@ -126,7 +131,8 @@ public class ClientFamilyMembersReadPlatformServiceImpl implements ClientFamilyM
         final List<CodeValueData> professionOptions = new ArrayList<>(
                 this.codeValueReadPlatformService.retrieveCodeValuesByCode("PROFESSION"));
 
-        return ClientFamilyMembersData.templateInstance(relationshipOptions, genderOptions, maritalStatusOptions, professionOptions);
+        return ClientFamilyMembersData.builder().relationshipIdOptions(relationshipOptions).genderIdOptions(genderOptions)
+                .maritalStatusIdOptions(maritalStatusOptions).professionIdOptions(professionOptions).build();
     }
 
 }

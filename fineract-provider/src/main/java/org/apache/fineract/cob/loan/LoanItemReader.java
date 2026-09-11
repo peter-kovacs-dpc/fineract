@@ -18,61 +18,27 @@
  */
 package org.apache.fineract.cob.loan;
 
-import java.util.ArrayList;
-import java.util.List;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.fineract.cob.exceptions.LoanAccountWasAlreadyLocked;
-import org.apache.fineract.cob.exceptions.LoanReadException;
+import org.apache.fineract.cob.service.BeforeStepLockingItemReaderHelper;
 import org.apache.fineract.portfolio.loanaccount.domain.Loan;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanRepository;
-import org.apache.fineract.portfolio.loanaccount.exception.LoanNotFoundException;
-import org.jetbrains.annotations.NotNull;
-import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.StepExecution;
-import org.springframework.batch.core.annotation.AfterStep;
 import org.springframework.batch.core.annotation.BeforeStep;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.batch.item.ItemReader;
+import org.springframework.lang.NonNull;
 
 @Slf4j
-@RequiredArgsConstructor
-public class LoanItemReader implements ItemReader<Loan> {
+public class LoanItemReader extends AbstractLoanItemReader<Loan> {
 
-    private final LoanRepository loanRepository;
-    private List<Long> alreadyLockedAccounts;
-    private List<Long> remainingData;
-    private Long loanId;
+    private final BeforeStepLockingItemReaderHelper beforeStepLockingItemReaderHelper;
+
+    public LoanItemReader(LoanRepository loanRepository, BeforeStepLockingItemReaderHelper beforeStepLockingItemReaderHelper) {
+        super(loanRepository);
+        this.beforeStepLockingItemReaderHelper = beforeStepLockingItemReaderHelper;
+    }
 
     @BeforeStep
-    public void beforeStep(@NotNull StepExecution stepExecution) {
-        ExecutionContext executionContext = stepExecution.getExecutionContext();
-        ExecutionContext jobExecutionContext = stepExecution.getJobExecution().getExecutionContext();
-        List<Long> loanIds = (List<Long>) executionContext.get(LoanCOBConstant.LOAN_IDS);
-        alreadyLockedAccounts = (List<Long>) jobExecutionContext.get(LoanCOBConstant.ALREADY_LOCKED_LOAN_IDS);
-        remainingData = new ArrayList<>(loanIds);
+    public void beforeStep(@NonNull StepExecution stepExecution) {
+        setRemainingData(beforeStepLockingItemReaderHelper.filterRemainingData(stepExecution));
     }
 
-    @Override
-    public Loan read() throws Exception {
-        try {
-            if (remainingData.size() > 0) {
-                loanId = remainingData.remove(0);
-                if (alreadyLockedAccounts != null && alreadyLockedAccounts.remove(loanId)) {
-                    throw new LoanAccountWasAlreadyLocked(loanId);
-                }
-
-                return loanRepository.findById(loanId).orElseThrow(() -> new LoanNotFoundException(loanId));
-            }
-        } catch (Exception e) {
-            throw new LoanReadException(loanId, e);
-        }
-        return null;
-
-    }
-
-    @AfterStep
-    public ExitStatus afterStep(@NotNull StepExecution stepExecution) {
-        return ExitStatus.COMPLETED;
-    }
 }

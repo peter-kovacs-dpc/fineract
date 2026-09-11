@@ -23,6 +23,7 @@ import java.util.Collection;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.fineract.infrastructure.core.domain.ExternalId;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.infrastructure.jobs.exception.JobExecutionException;
 import org.apache.fineract.portfolio.account.PortfolioAccountType;
@@ -37,6 +38,7 @@ import org.apache.fineract.portfolio.loanaccount.data.LoanInstallmentChargeData;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanStatus;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType;
 import org.apache.fineract.portfolio.loanaccount.service.LoanChargeReadPlatformService;
+import org.apache.fineract.portfolio.loanproduct.exception.LinkedAccountRequiredException;
 import org.springframework.batch.core.StepContribution;
 import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.core.step.tasklet.Tasklet;
@@ -63,10 +65,17 @@ public class TransferFeeChargeForLoansTasklet implements Tasklet {
                             .retrieveInstallmentLoanCharges(chargeData.getId(), true);
                     PortfolioAccountData portfolioAccountData = null;
                     for (final LoanInstallmentChargeData installmentChargeData : chargePerInstallments) {
-                        if (!installmentChargeData.getDueDate().isAfter(DateUtils.getBusinessLocalDate())) {
+                        if (!DateUtils.isDateInTheFuture(installmentChargeData.getDueDate())) {
                             if (portfolioAccountData == null) {
                                 portfolioAccountData = accountAssociationsReadPlatformService
                                         .retriveLoanLinkedAssociation(chargeData.getLoanId());
+                            }
+                            if (portfolioAccountData == null) {
+                                errors.add(new LinkedAccountRequiredException("loan.transfer.fee.charge",
+                                        "Loan with id:" + chargeData.getLoanId()
+                                                + " has a charge payable by account transfer but no linked savings account",
+                                        chargeData.getLoanId()));
+                                break;
                             }
                             final boolean isExceptionForBalanceCheck = false;
                             final AccountTransferDTO accountTransferDTO = new AccountTransferDTO(DateUtils.getBusinessLocalDate(),
@@ -74,20 +83,27 @@ public class TransferFeeChargeForLoansTasklet implements Tasklet {
                                     portfolioAccountData.getId(), chargeData.getLoanId(), "Loan Charge Payment", null, null, null, null,
                                     LoanTransactionType.CHARGE_PAYMENT.getValue(), chargeData.getId(),
                                     installmentChargeData.getInstallmentNumber(), AccountTransferType.CHARGE_PAYMENT.getValue(), null, null,
-                                    null, null, null, null, isRegularTransaction, isExceptionForBalanceCheck);
+                                    ExternalId.empty(), null, null, null, isRegularTransaction, isExceptionForBalanceCheck);
                             transferFeeCharge(accountTransferDTO, errors);
                         }
                     }
-                } else if (chargeData.getDueDate() != null && !chargeData.getDueDate().isAfter(DateUtils.getBusinessLocalDate())) {
+                } else if (chargeData.getDueDate() != null && !DateUtils.isDateInTheFuture(chargeData.getDueDate())) {
                     final PortfolioAccountData portfolioAccountData = accountAssociationsReadPlatformService
                             .retriveLoanLinkedAssociation(chargeData.getLoanId());
+                    if (portfolioAccountData == null) {
+                        errors.add(new LinkedAccountRequiredException("loan.transfer.fee.charge",
+                                "Loan with id:" + chargeData.getLoanId()
+                                        + " has a charge payable by account transfer but no linked savings account",
+                                chargeData.getLoanId()));
+                        continue;
+                    }
                     final boolean isExceptionForBalanceCheck = false;
                     final AccountTransferDTO accountTransferDTO = new AccountTransferDTO(DateUtils.getBusinessLocalDate(),
                             chargeData.getAmountOutstanding(), PortfolioAccountType.SAVINGS, PortfolioAccountType.LOAN,
                             portfolioAccountData.getId(), chargeData.getLoanId(), "Loan Charge Payment", null, null, null, null,
                             LoanTransactionType.CHARGE_PAYMENT.getValue(), chargeData.getId(), null,
-                            AccountTransferType.CHARGE_PAYMENT.getValue(), null, null, null, null, null, null, isRegularTransaction,
-                            isExceptionForBalanceCheck);
+                            AccountTransferType.CHARGE_PAYMENT.getValue(), null, null, ExternalId.empty(), null, null, null,
+                            isRegularTransaction, isExceptionForBalanceCheck);
                     transferFeeCharge(accountTransferDTO, errors);
                 }
             }

@@ -18,7 +18,10 @@
  */
 package org.apache.fineract.infrastructure.bulkimport.populator.loan;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import org.apache.fineract.infrastructure.bulkimport.constants.LoanConstants;
 import org.apache.fineract.infrastructure.bulkimport.constants.TemplatePopulateImportConstants;
 import org.apache.fineract.infrastructure.bulkimport.populator.AbstractWorkbookPopulator;
@@ -166,10 +169,10 @@ public class LoanWorkbookPopulator extends AbstractWorkbookPopulator {
                 .createFormulaListConstraint("INDIRECT(CONCATENATE(\"Staff_\",$A1))");
         DataValidationConstraint submittedDateConstraint = validationHelper.createDateConstraint(
                 DataValidationConstraint.OperatorType.BETWEEN,
-                "=IF(INDIRECT(CONCATENATE(\"START_DATE_\",$E1))>VLOOKUP($C1,$AR$2:$AT$"
-                        + (clientSheetPopulator.getClientsSize() + groupSheetPopulator.getGroupsSize() + 1)
-                        + ",3,FALSE),INDIRECT(CONCATENATE(\"START_DATE_\",$E1)),VLOOKUP($C1,$AR$2:$AT$"
-                        + (clientSheetPopulator.getClientsSize() + groupSheetPopulator.getGroupsSize() + 1) + ",3,FALSE))",
+                "=IF(" + "DATEVALUE(INDIRECT(\"START_DATE_\" & $E1)) > DATEVALUE(VLOOKUP($C1, $AR$2:$AT$"
+                        + (clientSheetPopulator.getClientsSize() + groupSheetPopulator.getGroupsSize() + 1) + ", 3, FALSE)), "
+                        + "DATEVALUE(INDIRECT(\"START_DATE_\" & $E1)), " + "DATEVALUE(VLOOKUP($C1, $AR$2:$AT$"
+                        + (clientSheetPopulator.getClientsSize() + groupSheetPopulator.getGroupsSize() + 1) + ", 3, FALSE)))",
                 "=TODAY()", dateFormat);
         DataValidationConstraint approvalDateConstraint = validationHelper
                 .createDateConstraint(DataValidationConstraint.OperatorType.BETWEEN, "=$G1", "=TODAY()", dateFormat);
@@ -516,12 +519,18 @@ public class LoanWorkbookPopulator extends AbstractWorkbookPopulator {
                 TemplatePopulateImportConstants.CHARGE_SHEET_NAME + "!$B$2:$B$" + (chargeSheetPopulator.getChargesSize() + 1));
 
         // Default Charge Name, Charge Amount, Charge Amount Type, Charge Due Date
+        Set<String> seenChargeNames = new HashSet<>();
         for (Integer i = 0; i < charges.size(); i++) {
+            String chargeName = charges.get(i).getName().trim().replaceAll("[ )(]", "_");
+            // Guard against duplicate charge-keyed defined names — POI rejects a duplicate and 500s the whole
+            // template. Excel defined names are case-insensitive, so upper-case the key. The names are resolved
+            // before any createName() call so a skipped charge leaves no orphan Name in the workbook.
+            if (!seenChargeNames.add(chargeName.toUpperCase(Locale.ROOT))) {
+                continue;
+            }
             Name chargeColName = loanWorkbook.createName();
             Name chargeAmount = loanWorkbook.createName();
             Name chargeAmountType = loanWorkbook.createName();
-
-            String chargeName = charges.get(i).getName().trim().replaceAll("[ )(]", "_");
 
             chargeColName.setNameName("CHARGE_NAME_" + chargeName);
             chargeColName.setRefersToFormula(TemplatePopulateImportConstants.CHARGE_SHEET_NAME + "!$B$" + (i + 2));
@@ -548,7 +557,14 @@ public class LoanWorkbookPopulator extends AbstractWorkbookPopulator {
         // Interest Calculation Period, Transaction Processing Strategy, Arrears
         // Tolerance, GraceOnPrincipalPayment, GraceOnInterestPayment,
         // GraceOnInterestCharged, StartDate Names for each loan product
+        Set<String> seenProductNames = new HashSet<>();
         for (Integer i = 0; i < products.size(); i++) {
+            String productName = products.get(i).getName().replaceAll("[ ]", "_");
+            // Guard against duplicate product-keyed defined names — POI rejects a duplicate and 500s the whole
+            // template. Excel defined names are case-insensitive, so key on the sanitised, upper-cased name.
+            if (!seenProductNames.add(sanitizeName(productName).toUpperCase(Locale.ROOT))) {
+                continue;
+            }
             Name fundName = loanWorkbook.createName();
             Name principalName = loanWorkbook.createName();
             Name minPrincipalName = loanWorkbook.createName();
@@ -571,7 +587,6 @@ public class LoanWorkbookPopulator extends AbstractWorkbookPopulator {
             Name graceOnInterestPaymentName = loanWorkbook.createName();
             Name graceOnInterestChargedName = loanWorkbook.createName();
             Name startDateName = loanWorkbook.createName();
-            String productName = products.get(i).getName().replaceAll("[ ]", "_");
             setSanitized(fundName, "FUND_" + productName);
             setSanitized(principalName, "PRINCIPAL_" + productName);
             setSanitized(minPrincipalName, "MIN_PRINCIPAL_" + productName);

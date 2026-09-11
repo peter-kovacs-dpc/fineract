@@ -19,14 +19,16 @@
 package org.apache.fineract.portfolio.client.service;
 
 import com.google.gson.JsonElement;
+import jakarta.persistence.PersistenceException;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import javax.persistence.PersistenceException;
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.fineract.commands.domain.CommandWrapper;
 import org.apache.fineract.commands.service.CommandProcessingService;
@@ -36,31 +38,39 @@ import org.apache.fineract.infrastructure.accountnumberformat.domain.AccountNumb
 import org.apache.fineract.infrastructure.accountnumberformat.domain.EntityAccountType;
 import org.apache.fineract.infrastructure.codes.domain.CodeValue;
 import org.apache.fineract.infrastructure.codes.domain.CodeValueRepositoryWrapper;
-import org.apache.fineract.infrastructure.configuration.data.GlobalConfigurationPropertyData;
 import org.apache.fineract.infrastructure.configuration.domain.ConfigurationDomainService;
-import org.apache.fineract.infrastructure.configuration.service.ConfigurationReadPlatformService;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuilder;
+import org.apache.fineract.infrastructure.core.domain.ExternalId;
+import org.apache.fineract.infrastructure.core.exception.ErrorHandler;
 import org.apache.fineract.infrastructure.core.exception.PlatformDataIntegrityException;
 import org.apache.fineract.infrastructure.core.serialization.FromJsonHelper;
+import org.apache.fineract.infrastructure.core.service.DateUtils;
+import org.apache.fineract.infrastructure.core.service.ExternalIdFactory;
 import org.apache.fineract.infrastructure.dataqueries.data.EntityTables;
 import org.apache.fineract.infrastructure.dataqueries.data.StatusEnum;
 import org.apache.fineract.infrastructure.dataqueries.service.EntityDatatableChecksWritePlatformService;
 import org.apache.fineract.infrastructure.event.business.domain.client.ClientActivateBusinessEvent;
+import org.apache.fineract.infrastructure.event.business.domain.client.ClientCloseBusinessEvent;
 import org.apache.fineract.infrastructure.event.business.domain.client.ClientCreateBusinessEvent;
+import org.apache.fineract.infrastructure.event.business.domain.client.ClientReactivateBusinessEvent;
 import org.apache.fineract.infrastructure.event.business.domain.client.ClientRejectBusinessEvent;
+import org.apache.fineract.infrastructure.event.business.domain.client.ClientUndoRejectionBusinessEvent;
+import org.apache.fineract.infrastructure.event.business.domain.client.ClientUndoWithdrawalBusinessEvent;
+import org.apache.fineract.infrastructure.event.business.domain.client.ClientWithdrawBusinessEvent;
 import org.apache.fineract.infrastructure.event.business.service.BusinessEventNotifierService;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
 import org.apache.fineract.organisation.office.domain.Office;
 import org.apache.fineract.organisation.office.domain.OfficeRepositoryWrapper;
 import org.apache.fineract.organisation.staff.domain.Staff;
 import org.apache.fineract.organisation.staff.domain.StaffRepositoryWrapper;
+import org.apache.fineract.portfolio.account.service.AccountNumberGenerator;
 import org.apache.fineract.portfolio.address.service.AddressWritePlatformService;
 import org.apache.fineract.portfolio.client.api.ClientApiConstants;
 import org.apache.fineract.portfolio.client.data.ClientDataValidator;
-import org.apache.fineract.portfolio.client.domain.AccountNumberGenerator;
 import org.apache.fineract.portfolio.client.domain.Client;
+import org.apache.fineract.portfolio.client.domain.ClientEnumerations;
 import org.apache.fineract.portfolio.client.domain.ClientNonPerson;
 import org.apache.fineract.portfolio.client.domain.ClientNonPersonRepositoryWrapper;
 import org.apache.fineract.portfolio.client.domain.ClientRepositoryWrapper;
@@ -86,12 +96,12 @@ import org.apache.fineract.portfolio.savings.domain.SavingsProductRepository;
 import org.apache.fineract.portfolio.savings.exception.SavingsProductNotFoundException;
 import org.apache.fineract.portfolio.savings.service.SavingsApplicationProcessWritePlatformService;
 import org.apache.fineract.useradministration.domain.AppUser;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@AllArgsConstructor
 @Service
 @Slf4j
 public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWritePlatformService {
@@ -114,52 +124,11 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
     private final ConfigurationDomainService configurationDomainService;
     private final AccountNumberFormatRepositoryWrapper accountNumberFormatRepository;
     private final FromJsonHelper fromApiJsonHelper;
-    private final ConfigurationReadPlatformService configurationReadPlatformService;
     private final AddressWritePlatformService addressWritePlatformService;
     private final ClientFamilyMembersWritePlatformService clientFamilyMembersWritePlatformService;
     private final BusinessEventNotifierService businessEventNotifierService;
     private final EntityDatatableChecksWritePlatformService entityDatatableChecksWritePlatformService;
-
-    @Autowired
-    public ClientWritePlatformServiceJpaRepositoryImpl(final PlatformSecurityContext context,
-            final ClientRepositoryWrapper clientRepository, final ClientNonPersonRepositoryWrapper clientNonPersonRepository,
-            final OfficeRepositoryWrapper officeRepositoryWrapper, final NoteRepository noteRepository,
-            final ClientDataValidator fromApiJsonDeserializer, final AccountNumberGenerator accountNumberGenerator,
-            final GroupRepository groupRepository, final StaffRepositoryWrapper staffRepository,
-            final CodeValueRepositoryWrapper codeValueRepository, final LoanRepositoryWrapper loanRepositoryWrapper,
-            final SavingsAccountRepositoryWrapper savingsRepositoryWrapper, final SavingsProductRepository savingsProductRepository,
-            final SavingsApplicationProcessWritePlatformService savingsApplicationProcessWritePlatformService,
-            final CommandProcessingService commandProcessingService, final ConfigurationDomainService configurationDomainService,
-            final AccountNumberFormatRepositoryWrapper accountNumberFormatRepository, final FromJsonHelper fromApiJsonHelper,
-            final ConfigurationReadPlatformService configurationReadPlatformService,
-            final AddressWritePlatformService addressWritePlatformService,
-            final ClientFamilyMembersWritePlatformService clientFamilyMembersWritePlatformService,
-            final BusinessEventNotifierService businessEventNotifierService,
-            final EntityDatatableChecksWritePlatformService entityDatatableChecksWritePlatformService) {
-        this.context = context;
-        this.clientRepository = clientRepository;
-        this.clientNonPersonRepository = clientNonPersonRepository;
-        this.officeRepositoryWrapper = officeRepositoryWrapper;
-        this.noteRepository = noteRepository;
-        this.fromApiJsonDeserializer = fromApiJsonDeserializer;
-        this.accountNumberGenerator = accountNumberGenerator;
-        this.groupRepository = groupRepository;
-        this.staffRepository = staffRepository;
-        this.codeValueRepository = codeValueRepository;
-        this.loanRepositoryWrapper = loanRepositoryWrapper;
-        this.savingsRepositoryWrapper = savingsRepositoryWrapper;
-        this.savingsProductRepository = savingsProductRepository;
-        this.savingsApplicationProcessWritePlatformService = savingsApplicationProcessWritePlatformService;
-        this.commandProcessingService = commandProcessingService;
-        this.configurationDomainService = configurationDomainService;
-        this.accountNumberFormatRepository = accountNumberFormatRepository;
-        this.fromApiJsonHelper = fromApiJsonHelper;
-        this.configurationReadPlatformService = configurationReadPlatformService;
-        this.addressWritePlatformService = addressWritePlatformService;
-        this.clientFamilyMembersWritePlatformService = clientFamilyMembersWritePlatformService;
-        this.businessEventNotifierService = businessEventNotifierService;
-        this.entityDatatableChecksWritePlatformService = entityDatatableChecksWritePlatformService;
-    }
+    private final ExternalIdFactory externalIdFactory;
 
     @Transactional
     @Override
@@ -182,14 +151,15 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
             this.clientRepository.flush();
             return new CommandProcessingResultBuilder() //
                     .withOfficeId(client.officeId()) //
+                    .withEntityExternalId(client.getExternalId()) //
                     .withClientId(clientId) //
                     .withEntityId(clientId) //
                     .build();
         } catch (final JpaSystemException | DataIntegrityViolationException dve) {
             Throwable throwable = ExceptionUtils.getRootCause(dve.getCause());
-            log.error("Error occured.", throwable);
-            throw new PlatformDataIntegrityException("error.msg.client.unknown.data.integrity.issue",
-                    "Unknown data integrity issue with resource.", dve);
+            log.error("Error occurred.", throwable);
+            throw ErrorHandler.getMappable(dve, "error.msg.client.unknown.data.integrity.issue",
+                    "Unknown data integrity issue with resource.");
         }
     }
 
@@ -197,9 +167,7 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
      * Guaranteed to throw an exception no matter what the data integrity issue is.
      */
     private void handleDataIntegrityIssues(final JsonCommand command, final Throwable realCause, final Exception dve) {
-
         if (realCause.getMessage().contains("external_id")) {
-
             final String externalId = command.stringValueOfParameterNamed("externalId");
             throw new PlatformDataIntegrityException("error.msg.client.duplicate.externalId",
                     "Client with externalId `" + externalId + "` already exists", "externalId", externalId);
@@ -214,8 +182,8 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
         }
 
         logAsErrorUnexpectedDataIntegrityException(dve);
-        throw new PlatformDataIntegrityException("error.msg.client.unknown.data.integrity.issue",
-                "Unknown data integrity issue with resource.");
+        throw ErrorHandler.getMappable(dve, "error.msg.client.unknown.data.integrity.issue",
+                "Unknown data integrity issue with resource: " + realCause.getMessage());
     }
 
     @Transactional
@@ -227,12 +195,7 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
 
             this.fromApiJsonDeserializer.validateForCreate(command.json());
 
-            final GlobalConfigurationPropertyData configuration = this.configurationReadPlatformService
-                    .retrieveGlobalConfiguration("Enable-Address");
-
-            final Boolean isAddressEnabled = configuration.isEnabled();
-
-            final Boolean isStaff = command.booleanObjectValueOfParameterNamed(ClientApiConstants.isStaffParamName);
+            final Boolean isAddressEnabled = configurationDomainService.isAddressEnabled();
 
             final Long officeId = command.longValueOfParameterNamed(ClientApiConstants.officeIdParamName);
 
@@ -277,41 +240,81 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
                         .orElseThrow(() -> new SavingsProductNotFoundException(savingsProductId));
             }
 
-            final Integer legalFormParamValue = command.integerValueOfParameterNamed(ClientApiConstants.legalFormIdParamName);
             boolean isEntity = false;
-            Integer legalFormValue = null;
+            LegalForm legalForm = null;
+            final Integer legalFormParamValue = command.integerValueOfParameterNamed(ClientApiConstants.legalFormIdParamName);
             if (legalFormParamValue != null) {
-                LegalForm legalForm = LegalForm.fromInt(legalFormParamValue);
+                legalForm = LegalForm.fromInt(legalFormParamValue);
                 if (legalForm != null) {
-                    legalFormValue = legalForm.getValue();
                     isEntity = legalForm.isEntity();
                 }
             }
-
-            final Client newClient = Client.createNew(currentUser, clientOffice, clientParentGroup, staff, savingsProductId, gender,
-                    clientType, clientClassification, legalFormValue, command);
-            this.clientRepository.saveAndFlush(newClient);
-            boolean rollbackTransaction = false;
-            if (newClient.isActive()) {
-                validateParentGroupRulesBeforeClientActivation(newClient);
-                runEntityDatatableCheck(newClient.getId());
-                final CommandWrapper commandWrapper = new CommandWrapperBuilder().activateClient(null).build();
-                rollbackTransaction = this.commandProcessingService.validateCommand(commandWrapper, currentUser);
+            if (legalForm == null) {
+                legalForm = LegalForm.PERSON;
             }
 
+            final String accountNo = command.stringValueOfParameterNamed(ClientApiConstants.accountNoParamName);
+            final String mobileNo = command.stringValueOfParameterNamed(ClientApiConstants.mobileNoParamName);
+            final String emailAddress = command.stringValueOfParameterNamed(ClientApiConstants.emailAddressParamName);
+            final String firstname = command.stringValueOfParameterNamed(ClientApiConstants.firstnameParamName);
+            final String middlename = command.stringValueOfParameterNamed(ClientApiConstants.middlenameParamName);
+            final String lastname = command.stringValueOfParameterNamed(ClientApiConstants.lastnameParamName);
+            final String fullname = command.stringValueOfParameterNamed(ClientApiConstants.fullnameParamName);
+            final boolean isStaff = command.booleanPrimitiveValueOfParameterNamed(ClientApiConstants.isStaffParamName);
+            final LocalDate dataOfBirth = command.localDateValueOfParameterNamed(ClientApiConstants.dateOfBirthParamName);
+
+            ClientStatus status = ClientStatus.PENDING;
+            boolean active = false;
+            if (command.hasParameter("active")) {
+                active = command.booleanPrimitiveValueOfParameterNamed(ClientApiConstants.activeParamName);
+            }
+
+            LocalDate activationDate = null;
+            LocalDate officeJoiningDate = null;
+            if (active) {
+                status = ClientStatus.ACTIVE;
+                activationDate = command.localDateValueOfParameterNamed(ClientApiConstants.activationDateParamName);
+                officeJoiningDate = activationDate;
+            }
+
+            LocalDate submittedOnDate = DateUtils.getBusinessLocalDate();
+            if (command.hasParameter(ClientApiConstants.submittedOnDateParamName)) {
+                submittedOnDate = command.localDateValueOfParameterNamed(ClientApiConstants.submittedOnDateParamName);
+            }
+            if (active && DateUtils.isAfter(submittedOnDate, activationDate)) {
+                submittedOnDate = activationDate;
+            }
+            final Long savingsAccountId = null;
+
+            final ExternalId externalId = externalIdFactory.createFromCommand(command, ClientApiConstants.externalIdParamName);
+
+            final Client newClient = Client.instance(currentUser, status, clientOffice, clientParentGroup, accountNo, firstname, middlename,
+                    lastname, fullname, activationDate, officeJoiningDate, externalId, mobileNo, emailAddress, staff, submittedOnDate,
+                    savingsProductId, savingsAccountId, dataOfBirth, gender, clientType, clientClassification, legalForm.getValue(),
+                    isStaff);
+
+            // Account Number generation
             this.clientRepository.saveAndFlush(newClient);
-            if (newClient.isAccountNumberRequiresAutoGeneration()) {
+            if (StringUtils.isBlank(accountNo)) {
                 AccountNumberFormat accountNumberFormat = this.accountNumberFormatRepository.findByAccountType(EntityAccountType.CLIENT);
                 newClient.updateAccountNo(accountNumberGenerator.generate(newClient, accountNumberFormat));
                 this.clientRepository.saveAndFlush(newClient);
             }
+
+            boolean rollbackTransaction = false;
+            if (newClient.isActive()) {
+                validateParentGroupRulesBeforeClientActivation(newClient);
+                runEntityDatatableCheck(newClient.getId(), newClient.getLegalForm());
+                final CommandWrapper commandWrapper = new CommandWrapperBuilder().activateClient(null).build();
+                rollbackTransaction = this.commandProcessingService.validateRollbackCommand(commandWrapper, currentUser);
+            }
+            this.clientRepository.saveAndFlush(newClient);
 
             final Locale locale = command.extractLocale();
             final DateTimeFormatter fmt = DateTimeFormatter.ofPattern(command.dateFormat()).withLocale(locale);
             CommandProcessingResult result = openSavingsAccount(newClient, fmt);
             if (result.getSavingsId() != null) {
                 this.clientRepository.saveAndFlush(newClient);
-
             }
 
             if (isEntity) {
@@ -327,26 +330,28 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
             }
 
             if (command.parameterExists(ClientApiConstants.datatables)) {
-                this.entityDatatableChecksWritePlatformService.saveDatatables(StatusEnum.CREATE.getCode().longValue(),
-                        EntityTables.CLIENT.getName(), newClient.getId(), null,
-                        command.arrayOfParameterNamed(ClientApiConstants.datatables));
+                this.entityDatatableChecksWritePlatformService.saveDatatables(StatusEnum.CREATE.getValue(), EntityTables.CLIENT.getName(),
+                        newClient.getId(), null, command.arrayOfParameterNamed(ClientApiConstants.datatables));
             }
 
+            legalForm = LegalForm.fromInt(newClient.getLegalForm());
             entityDatatableChecksWritePlatformService.runTheCheck(newClient.getId(), EntityTables.CLIENT.getName(),
-                    StatusEnum.CREATE.getCode().longValue(), EntityTables.CLIENT.getForeignKeyColumnNameOnDatatable());
+                    StatusEnum.CREATE.getValue(), EntityTables.CLIENT.getForeignKeyColumnNameOnDatatable(), legalForm.getLabel());
             businessEventNotifierService.notifyPostBusinessEvent(new ClientCreateBusinessEvent(newClient));
             if (newClient.isActive()) {
                 businessEventNotifierService.notifyPostBusinessEvent(new ClientActivateBusinessEvent(newClient));
             }
+
             return new CommandProcessingResultBuilder() //
                     .withCommandId(command.commandId()) //
+                    .withEntityExternalId(newClient.getExternalId()) //
                     .withOfficeId(clientOffice.getId()) //
                     .withClientId(newClient.getId()) //
                     .withGroupId(groupId) //
                     .withEntityId(newClient.getId()) //
-                    .withSavingsId(result.getSavingsId())//
-                    .setRollbackTransaction(rollbackTransaction)//
-                    .setRollbackTransaction(result.isRollbackTransaction())//
+                    .withSavingsId(result.getSavingsId()) //
+                    .setRollbackTransaction(rollbackTransaction) //
+                    .setRollbackTransaction(result.isRollbackTransaction()) //
                     .build();
         } catch (final JpaSystemException | DataIntegrityViolationException dve) {
             handleDataIntegrityIssues(command, dve.getMostSpecificCause(), dve);
@@ -375,9 +380,6 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
             final LocalDate incorpValidityTill = this.fromApiJsonHelper
                     .extractLocalDateNamed(ClientApiConstants.incorpValidityTillParamName, clientNonPersonElement);
 
-            // JsonCommand clientNonPersonCommand =
-            // JsonCommand.fromExistingCommand(command,
-            // command.arrayOfParameterNamed(ClientApiConstants.clientNonPersonDetailsParamName).getAsJsonObject());
             CodeValue clientNonPersonConstitution = null;
             final Long clientNonPersonConstitutionId = this.fromApiJsonHelper.extractLongNamed(ClientApiConstants.constitutionIdParamName,
                     clientNonPersonElement);
@@ -417,7 +419,143 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
 
             this.context.validateAccessRights(clientHierarchy);
 
-            final Map<String, Object> changes = clientForUpdate.update(command);
+            final Map<String, Object> changes = new LinkedHashMap<>(9);
+
+            if (command.isChangeInIntegerParameterNamed(ClientApiConstants.statusParamName, clientForUpdate.getStatus())) {
+                final Integer newValue = command.integerValueOfParameterNamed(ClientApiConstants.statusParamName);
+                changes.put(ClientApiConstants.statusParamName, ClientEnumerations.status(newValue));
+                clientForUpdate.setStatus(ClientStatus.fromInt(newValue).getValue());
+            }
+
+            if (command.isChangeInStringParameterNamed(ClientApiConstants.accountNoParamName, clientForUpdate.getAccountNumber())) {
+                final String newValue = command.stringValueOfParameterNamed(ClientApiConstants.accountNoParamName);
+                changes.put(ClientApiConstants.accountNoParamName, newValue);
+                clientForUpdate.setAccountNumber(StringUtils.defaultIfEmpty(newValue, null));
+            }
+
+            final ExternalId externalId = externalIdFactory.createFromCommand(command, ClientApiConstants.externalIdParamName);
+            if (command.isChangeInStringParameterNamed(ClientApiConstants.externalIdParamName,
+                    clientForUpdate.getExternalId().getValue())) {
+                changes.put(ClientApiConstants.externalIdParamName, externalId.getValue());
+                clientForUpdate.setExternalId(externalId);
+            }
+
+            if (command.isChangeInStringParameterNamed(ClientApiConstants.mobileNoParamName, clientForUpdate.getMobileNo())) {
+                final String newValue = command.stringValueOfParameterNamed(ClientApiConstants.mobileNoParamName);
+                changes.put(ClientApiConstants.mobileNoParamName, newValue);
+                clientForUpdate.setMobileNo(StringUtils.defaultIfEmpty(newValue, null));
+            }
+
+            if (command.isChangeInStringParameterNamed(ClientApiConstants.emailAddressParamName, clientForUpdate.getEmailAddress())) {
+                final String newValue = command.stringValueOfParameterNamed(ClientApiConstants.emailAddressParamName);
+                changes.put(ClientApiConstants.emailAddressParamName, newValue);
+                clientForUpdate.setEmailAddress(StringUtils.defaultIfEmpty(newValue, null));
+            }
+
+            if (command.isChangeInStringParameterNamed(ClientApiConstants.firstnameParamName, clientForUpdate.getFirstname())) {
+                final String newValue = command.stringValueOfParameterNamed(ClientApiConstants.firstnameParamName);
+                changes.put(ClientApiConstants.firstnameParamName, newValue);
+                clientForUpdate.setFirstname(StringUtils.defaultIfEmpty(newValue, null));
+            }
+
+            if (command.isChangeInStringParameterNamed(ClientApiConstants.middlenameParamName, clientForUpdate.getMiddlename())) {
+                final String newValue = command.stringValueOfParameterNamed(ClientApiConstants.middlenameParamName);
+                changes.put(ClientApiConstants.middlenameParamName, newValue);
+                clientForUpdate.setMiddlename(StringUtils.defaultIfEmpty(newValue, null));
+            }
+
+            if (command.isChangeInStringParameterNamed(ClientApiConstants.lastnameParamName, clientForUpdate.getLastname())) {
+                final String newValue = command.stringValueOfParameterNamed(ClientApiConstants.lastnameParamName);
+                changes.put(ClientApiConstants.lastnameParamName, newValue);
+                clientForUpdate.setLastname(StringUtils.defaultIfEmpty(newValue, null));
+            }
+
+            if (command.isChangeInStringParameterNamed(ClientApiConstants.fullnameParamName, clientForUpdate.getFullname())) {
+                final String newValue = command.stringValueOfParameterNamed(ClientApiConstants.fullnameParamName);
+                changes.put(ClientApiConstants.fullnameParamName, newValue);
+                clientForUpdate.setFullname(newValue);
+            }
+
+            if (command.isChangeInLongParameterNamed(ClientApiConstants.staffIdParamName, clientForUpdate.staffId())) {
+                final Long newValue = command.longValueOfParameterNamed(ClientApiConstants.staffIdParamName);
+                changes.put(ClientApiConstants.staffIdParamName, newValue);
+            }
+
+            if (command.isChangeInLongParameterNamed(ClientApiConstants.genderIdParamName, clientForUpdate.genderId())) {
+                final Long newValue = command.longValueOfParameterNamed(ClientApiConstants.genderIdParamName);
+                changes.put(ClientApiConstants.genderIdParamName, newValue);
+            }
+
+            if (command.isChangeInLongParameterNamed(ClientApiConstants.savingsProductIdParamName, clientForUpdate.savingsProductId())) {
+                final Long newValue = command.longValueOfParameterNamed(ClientApiConstants.savingsProductIdParamName);
+                changes.put(ClientApiConstants.savingsProductIdParamName, newValue);
+            }
+
+            if (command.isChangeInLongParameterNamed(ClientApiConstants.clientTypeIdParamName, clientForUpdate.clientTypeId())) {
+                final Long newValue = command.longValueOfParameterNamed(ClientApiConstants.clientTypeIdParamName);
+                changes.put(ClientApiConstants.clientTypeIdParamName, newValue);
+            }
+
+            if (command.isChangeInLongParameterNamed(ClientApiConstants.clientClassificationIdParamName,
+                    clientForUpdate.clientClassificationId())) {
+                final Long newValue = command.longValueOfParameterNamed(ClientApiConstants.clientClassificationIdParamName);
+                changes.put(ClientApiConstants.clientClassificationIdParamName, newValue);
+            }
+
+            if (command.isChangeInIntegerParameterNamed(ClientApiConstants.legalFormIdParamName, clientForUpdate.getLegalForm())) {
+                final Integer newValue = command.integerValueOfParameterNamed(ClientApiConstants.legalFormIdParamName);
+                if (newValue != null) {
+                    LegalForm legalForm = LegalForm.fromInt(newValue);
+                    if (legalForm != null) {
+                        changes.put(ClientApiConstants.legalFormIdParamName, ClientEnumerations.legalForm(newValue));
+                        clientForUpdate.setLegalForm(legalForm.getValue());
+                        clientForUpdate.resetDerivedNames(legalForm);
+                    } else {
+                        changes.put(ClientApiConstants.legalFormIdParamName, null);
+                        clientForUpdate.setLegalForm(null);
+                    }
+                } else {
+                    changes.put(ClientApiConstants.legalFormIdParamName, null);
+                    clientForUpdate.setLegalForm(null);
+                }
+            }
+
+            final String dateFormatAsInput = command.dateFormat();
+            final String localeAsInput = command.locale();
+
+            if (command.isChangeInLocalDateParameterNamed(ClientApiConstants.activationDateParamName,
+                    clientForUpdate.getActivationDate())) {
+                final String valueAsInput = command.stringValueOfParameterNamed(ClientApiConstants.activationDateParamName);
+                changes.put(ClientApiConstants.activationDateParamName, valueAsInput);
+                changes.put(ClientApiConstants.dateFormatParamName, dateFormatAsInput);
+                changes.put(ClientApiConstants.localeParamName, localeAsInput);
+
+                clientForUpdate.setActivationDate(command.localDateValueOfParameterNamed(ClientApiConstants.activationDateParamName));
+                clientForUpdate.setOfficeJoiningDate(clientForUpdate.getActivationDate());
+            }
+
+            if (command.isChangeInLocalDateParameterNamed(ClientApiConstants.dateOfBirthParamName, clientForUpdate.getDateOfBirth())) {
+                final String valueAsInput = command.stringValueOfParameterNamed(ClientApiConstants.dateOfBirthParamName);
+                changes.put(ClientApiConstants.dateOfBirthParamName, valueAsInput);
+                changes.put(ClientApiConstants.dateFormatParamName, dateFormatAsInput);
+                changes.put(ClientApiConstants.localeParamName, localeAsInput);
+
+                clientForUpdate.setDateOfBirth(command.localDateValueOfParameterNamed(ClientApiConstants.dateOfBirthParamName));
+            }
+
+            if (command.isChangeInLocalDateParameterNamed(ClientApiConstants.submittedOnDateParamName,
+                    clientForUpdate.getSubmittedOnDate())) {
+                final String valueAsInput = command.stringValueOfParameterNamed(ClientApiConstants.submittedOnDateParamName);
+                changes.put(ClientApiConstants.submittedOnDateParamName, valueAsInput);
+                changes.put(ClientApiConstants.dateFormatParamName, dateFormatAsInput);
+                changes.put(ClientApiConstants.localeParamName, localeAsInput);
+
+                clientForUpdate.setSubmittedOnDate(command.localDateValueOfParameterNamed(ClientApiConstants.submittedOnDateParamName));
+            }
+
+            clientForUpdate.validateUpdate();
+
+            clientForUpdate.deriveDisplayName();
 
             if (changes.containsKey(ClientApiConstants.staffIdParamName)) {
 
@@ -431,7 +569,6 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
             }
 
             if (changes.containsKey(ClientApiConstants.genderIdParamName)) {
-
                 final Long newValue = command.longValueOfParameterNamed(ClientApiConstants.genderIdParamName);
                 CodeValue gender = null;
                 if (newValue != null) {
@@ -450,15 +587,6 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
                             .orElseThrow(() -> new SavingsProductNotFoundException(savingsProductId));
                 }
                 clientForUpdate.updateSavingsProduct(savingsProductId);
-            }
-
-            if (changes.containsKey(ClientApiConstants.genderIdParamName)) {
-                final Long newValue = command.longValueOfParameterNamed(ClientApiConstants.genderIdParamName);
-                CodeValue newCodeVal = null;
-                if (newValue != null) {
-                    newCodeVal = this.codeValueRepository.findOneByCodeNameAndIdWithNotFoundDetection(ClientApiConstants.GENDER, newValue);
-                }
-                clientForUpdate.updateGender(newCodeVal);
             }
 
             if (changes.containsKey(ClientApiConstants.clientTypeIdParamName)) {
@@ -555,6 +683,7 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
             }
             return new CommandProcessingResultBuilder() //
                     .withCommandId(command.commandId()) //
+                    .withEntityExternalId(clientForUpdate.getExternalId()) //
                     .withOfficeId(clientForUpdate.officeId()) //
                     .withClientId(clientId) //
                     .withEntityId(clientId) //
@@ -582,7 +711,7 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
             final DateTimeFormatter fmt = DateTimeFormatter.ofPattern(command.dateFormat()).withLocale(locale);
             final LocalDate activationDate = command.localDateValueOfParameterNamed("activationDate");
 
-            runEntityDatatableCheck(clientId);
+            runEntityDatatableCheck(clientId, client.getLegalForm());
 
             final AppUser currentUser = this.context.authenticatedUser();
             client.activate(currentUser, fmt, activationDate);
@@ -592,10 +721,11 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
             return new CommandProcessingResultBuilder() //
                     .withCommandId(command.commandId()) //
                     .withOfficeId(client.officeId()) //
+                    .withEntityExternalId(client.getExternalId()) //
                     .withClientId(clientId) //
                     .withEntityId(clientId) //
-                    .withSavingsId(result.getSavingsId())//
-                    .setRollbackTransaction(result.isRollbackTransaction())//
+                    .withSavingsId(result.getSavingsId()) //
+                    .setRollbackTransaction(result.isRollbackTransaction()) //
                     .build();
         } catch (final JpaSystemException | DataIntegrityViolationException dve) {
             handleDataIntegrityIssues(command, dve.getMostSpecificCause(), dve);
@@ -607,7 +737,7 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
         CommandProcessingResult commandProcessingResult = CommandProcessingResult.empty();
         if (client.isActive() && client.savingsProductId() != null) {
             SavingsAccountDataDTO savingsAccountDataDTO = new SavingsAccountDataDTO(client, null, client.savingsProductId(),
-                    client.getActivationLocalDate(), client.activatedBy(), fmt);
+                    client.getActivationDate(), client.activatedBy(), fmt);
             commandProcessingResult = this.savingsApplicationProcessWritePlatformService.createActiveApplication(savingsAccountDataDTO);
             if (commandProcessingResult.getSavingsId() != null) {
                 this.savingsRepositoryWrapper.findOneWithNotFoundDetection(commandProcessingResult.getSavingsId());
@@ -619,7 +749,7 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
     }
 
     private void logAsErrorUnexpectedDataIntegrityException(final Exception dve) {
-        log.error("Error occured.", dve);
+        log.error("Error occurred.", dve);
     }
 
     @Transactional
@@ -652,6 +782,7 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
                 .withCommandId(command.commandId()) //
                 .withOfficeId(clientForUpdate.officeId()) //
                 .withEntityId(clientForUpdate.getId()) //
+                .withEntityExternalId(clientForUpdate.getExternalId()) //
                 .withClientId(clientId) //
                 .with(actualChanges) //
                 .build();
@@ -684,6 +815,7 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
         return new CommandProcessingResultBuilder() //
                 .withCommandId(command.commandId()) //
                 .withOfficeId(clientForUpdate.officeId()) //
+                .withEntityExternalId(clientForUpdate.getExternalId()) //
                 .withEntityId(clientForUpdate.getId()) //
                 .withClientId(clientId) //
                 .with(actualChanges) //
@@ -713,21 +845,22 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
                 throw new InvalidClientStateTransitionException("close", "is.under.transfer", errorMessage);
             }
 
-            if (client.isNotPending() && client.getActivationLocalDate() != null && client.getActivationLocalDate().isAfter(closureDate)) {
+            if (client.isNotPending() && DateUtils.isAfter(client.getActivationDate(), closureDate)) {
                 final String errorMessage = "The client closureDate cannot be before the client ActivationDate.";
                 throw new InvalidClientStateTransitionException("close", "date.cannot.before.client.actvation.date", errorMessage,
-                        closureDate, client.getActivationLocalDate());
+                        closureDate, client.getActivationDate());
             }
-            entityDatatableChecksWritePlatformService.runTheCheck(clientId, EntityTables.CLIENT.getName(),
-                    StatusEnum.CLOSE.getCode().longValue(), EntityTables.CLIENT.getForeignKeyColumnNameOnDatatable());
+            final LegalForm legalForm = LegalForm.fromInt(client.getLegalForm());
+            entityDatatableChecksWritePlatformService.runTheCheck(clientId, EntityTables.CLIENT.getName(), StatusEnum.CLOSE.getValue(),
+                    EntityTables.CLIENT.getForeignKeyColumnNameOnDatatable(), legalForm.getLabel());
 
             final List<Loan> clientLoans = this.loanRepositoryWrapper.findLoanByClientId(clientId);
             for (final Loan loan : clientLoans) {
-                final LoanStatusMapper loanStatus = new LoanStatusMapper(loan.status().getValue());
+                final LoanStatusMapper loanStatus = new LoanStatusMapper(loan.getStatus().getValue());
                 if (loanStatus.isOpen() || loanStatus.isPendingApproval() || loanStatus.isAwaitingDisbursal()) {
                     final String errorMessage = "Client cannot be closed because of non-closed loans.";
                     throw new InvalidClientStateTransitionException("close", "loan.non-closed", errorMessage);
-                } else if (loanStatus.isClosed() && loan.getClosedOnDate().isAfter(closureDate)) {
+                } else if (loanStatus.isClosed() && DateUtils.isAfter(loan.getClosedOnDate(), closureDate)) {
                     final String errorMessage = "The client closureDate cannot be before the loan closedOnDate.";
                     throw new InvalidClientStateTransitionException("close", "date.cannot.before.loan.closed.date", errorMessage,
                             closureDate, loan.getClosedOnDate());
@@ -747,10 +880,12 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
 
             client.close(currentUser, closureReason, closureDate);
             this.clientRepository.saveAndFlush(client);
+            businessEventNotifierService.notifyPostBusinessEvent(new ClientCloseBusinessEvent(client));
             return new CommandProcessingResultBuilder() //
                     .withCommandId(command.commandId()) //
                     .withClientId(clientId) //
                     .withEntityId(clientId) //
+                    .withEntityExternalId(client.getExternalId()) //
                     .build();
         } catch (final JpaSystemException | DataIntegrityViolationException dve) {
             handleDataIntegrityIssues(command, dve.getMostSpecificCause(), dve);
@@ -789,6 +924,7 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
                 .withCommandId(command.commandId()) //
                 .withOfficeId(clientForUpdate.officeId()) //
                 .withEntityId(clientForUpdate.getId()) //
+                .withEntityExternalId(clientForUpdate.getExternalId()) //
                 .withClientId(clientId) //
                 .with(actualChanges) //
                 .build();
@@ -813,9 +949,10 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
         }
     }
 
-    private void runEntityDatatableCheck(final Long clientId) {
-        entityDatatableChecksWritePlatformService.runTheCheck(clientId, EntityTables.CLIENT.getName(),
-                StatusEnum.ACTIVATE.getCode().longValue(), EntityTables.CLIENT.getForeignKeyColumnNameOnDatatable());
+    private void runEntityDatatableCheck(final Long clientId, final Integer legalFormId) {
+        final LegalForm legalForm = LegalForm.fromInt(legalFormId);
+        entityDatatableChecksWritePlatformService.runTheCheck(clientId, EntityTables.CLIENT.getName(), StatusEnum.ACTIVATE.getValue(),
+                EntityTables.CLIENT.getForeignKeyColumnNameOnDatatable(), legalForm.getLabel());
     }
 
     @Override
@@ -834,7 +971,7 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
             final String errorMessage = "Only clients pending activation may be withdrawn.";
             throw new InvalidClientStateTransitionException("rejection", "on.account.not.in.pending.activation.status", errorMessage,
                     rejectionDate, client.getSubmittedOnDate());
-        } else if (client.getSubmittedOnDate().isAfter(rejectionDate)) {
+        } else if (DateUtils.isAfter(client.getSubmittedOnDate(), rejectionDate)) {
             final String errorMessage = "The client rejection date cannot be before the client submitted date.";
             throw new InvalidClientStateTransitionException("rejection", "date.cannot.before.client.submitted.date", errorMessage,
                     rejectionDate, client.getSubmittedOnDate());
@@ -846,6 +983,7 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
                 .withCommandId(command.commandId()) //
                 .withClientId(entityId) //
                 .withEntityId(entityId) //
+                .withEntityExternalId(client.getExternalId()) //
                 .build();
     }
 
@@ -865,17 +1003,19 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
             final String errorMessage = "Only clients pending activation may be withdrawn.";
             throw new InvalidClientStateTransitionException("withdrawal", "on.account.not.in.pending.activation.status", errorMessage,
                     withdrawalDate, client.getSubmittedOnDate());
-        } else if (client.getSubmittedOnDate().isAfter(withdrawalDate)) {
+        } else if (DateUtils.isAfter(client.getSubmittedOnDate(), withdrawalDate)) {
             final String errorMessage = "The client withdrawal date cannot be before the client submitted date.";
             throw new InvalidClientStateTransitionException("withdrawal", "date.cannot.before.client.submitted.date", errorMessage,
                     withdrawalDate, client.getSubmittedOnDate());
         }
         client.withdraw(currentUser, withdrawalReason, withdrawalDate);
         this.clientRepository.saveAndFlush(client);
+        businessEventNotifierService.notifyPostBusinessEvent(new ClientWithdrawBusinessEvent(client));
         return new CommandProcessingResultBuilder() //
                 .withCommandId(command.commandId()) //
                 .withClientId(entityId) //
                 .withEntityId(entityId) //
+                .withEntityExternalId(client.getExternalId()) //
                 .build();
     }
 
@@ -890,17 +1030,19 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
         if (!client.isClosed()) {
             final String errorMessage = "only closed clients may be reactivated.";
             throw new InvalidClientStateTransitionException("reactivation", "on.nonclosed.account", errorMessage);
-        } else if (client.getClosureDate().isAfter(reactivateDate)) {
+        } else if (DateUtils.isAfter(client.getClosureDate(), reactivateDate)) {
             final String errorMessage = "The client reactivation date cannot be before the client closed date.";
             throw new InvalidClientStateTransitionException("reactivation", "date.cannot.before.client.closed.date", errorMessage,
                     reactivateDate, client.getClosureDate());
         }
         client.reActivate(currentUser, reactivateDate);
         this.clientRepository.saveAndFlush(client);
+        businessEventNotifierService.notifyPostBusinessEvent(new ClientReactivateBusinessEvent(client));
         return new CommandProcessingResultBuilder() //
                 .withCommandId(command.commandId()) //
                 .withClientId(entityId) //
                 .withEntityId(entityId) //
+                .withEntityExternalId(client.getExternalId()) //
                 .build();
     }
 
@@ -915,7 +1057,7 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
         if (!client.isRejected()) {
             final String errorMessage = "only rejected clients may be reactivated.";
             throw new InvalidClientStateTransitionException("undorejection", "on.nonrejected.account", errorMessage);
-        } else if (client.getRejectedDate().isAfter(undoRejectDate)) {
+        } else if (DateUtils.isAfter(client.getRejectedDate(), undoRejectDate)) {
             final String errorMessage = "The client reactivation date cannot be before the client rejected date.";
             throw new InvalidClientStateTransitionException("reopened", "date.cannot.before.client.rejected.date", errorMessage,
                     undoRejectDate, client.getRejectedDate());
@@ -923,11 +1065,12 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
 
         client.reOpened(currentUser, undoRejectDate);
         this.clientRepository.saveAndFlush(client);
-
+        businessEventNotifierService.notifyPostBusinessEvent(new ClientUndoRejectionBusinessEvent(client));
         return new CommandProcessingResultBuilder() //
                 .withCommandId(command.commandId()) //
                 .withClientId(entityId) //
                 .withEntityId(entityId) //
+                .withEntityExternalId(client.getExternalId()) //
                 .build();
     }
 
@@ -942,18 +1085,20 @@ public class ClientWritePlatformServiceJpaRepositoryImpl implements ClientWriteP
         if (!client.isWithdrawn()) {
             final String errorMessage = "only withdrawal clients may be reactivated.";
             throw new InvalidClientStateTransitionException("undoWithdrawal", "on.nonwithdrawal.account", errorMessage);
-        } else if (client.getWithdrawalDate().isAfter(undoWithdrawalDate)) {
+        } else if (DateUtils.isAfter(client.getWithdrawalDate(), undoWithdrawalDate)) {
             final String errorMessage = "The client reactivation date cannot be before the client withdrawal date.";
             throw new InvalidClientStateTransitionException("reopened", "date.cannot.before.client.withdrawal.date", errorMessage,
                     undoWithdrawalDate, client.getWithdrawalDate());
         }
         client.reOpened(currentUser, undoWithdrawalDate);
         this.clientRepository.saveAndFlush(client);
-
+        businessEventNotifierService.notifyPostBusinessEvent(new ClientUndoWithdrawalBusinessEvent(client));
         return new CommandProcessingResultBuilder() //
                 .withCommandId(command.commandId()) //
                 .withClientId(entityId) //
                 .withEntityId(entityId) //
+                .withEntityExternalId(client.getExternalId()) //
                 .build();
     }
+
 }

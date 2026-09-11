@@ -18,16 +18,26 @@
  */
 package org.apache.fineract.integrationtests.client;
 
-import java.io.File;
+import static com.github.romankh3.image.comparison.model.ImageComparisonState.MATCH;
+import static java.util.Objects.requireNonNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+import com.github.romankh3.image.comparison.ImageComparison;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import javax.imageio.ImageIO;
+import lombok.extern.slf4j.Slf4j;
 import okhttp3.MediaType;
+import okhttp3.MultipartBody;
+import okhttp3.RequestBody;
 import okhttp3.ResponseBody;
+import org.apache.commons.codec.binary.Base64;
 import org.apache.fineract.client.services.ImagesApi;
 import org.apache.fineract.client.util.Parts;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import retrofit2.Call;
-import retrofit2.Response;
 import retrofit2.http.GET;
 import retrofit2.http.Headers;
 
@@ -36,9 +46,13 @@ import retrofit2.http.Headers;
  *
  * @author Michael Vorburger.ch
  */
-public class ImageTest extends IntegrationTest {
+@Slf4j
+class ImageTest extends IntegrationTest {
 
-    final File testImage = new File(getClass().getResource("/michael.vorburger-crepes.jpg").getFile());
+    static final String TEST_RESOURCE = "michael.vorburger-crepes.jpg";
+    static final int TEST_IMAGE_DIFF_PERCENTAGE = 2;
+
+    final MultipartBody.Part testPart = createPart(TEST_RESOURCE, TEST_RESOURCE, "image/jpeg");
 
     Long clientId = new ClientTest().getClientId();
     Long staffId = new StaffTest().getStaffId();
@@ -46,72 +60,73 @@ public class ImageTest extends IntegrationTest {
     @Test
     @Order(1)
     void create() {
-        ok(fineract().images.create("staff", staffId, Parts.fromFile(testImage)));
-        ok(fineract().images.create("clients", clientId, Parts.fromFile(testImage)));
+        ok(fineractClient().images.create("staff", staffId, testPart));
+        ok(fineractClient().images.create("clients", clientId, testPart));
     }
 
     @Test
     @Order(2)
     void getOriginalSize() throws IOException {
-        ResponseBody r = ok(fineract().images.get("staff", staffId, 3505, 1972, null));
+        var r = ok(fineractClient().images.get("staff", staffId, 3505, 1972, null));
         assertThat(r.contentType()).isEqualTo(MediaType.get("text/plain"));
-        String encodedImage = r.string();
+        var encodedImage = r.string();
         assertThat(encodedImage).startsWith("data:image/jpeg;base64,");
-        assertThat(encodedImage).hasLength(2846549);
         assertThat(r.contentLength()).isEqualTo(-1);
+        assertImage(encodedImage);
     }
 
     @Test
     @Order(3)
     void getSmallerSize() throws IOException {
-        ResponseBody r = ok(fineract().images.get("staff", staffId, 128, 128, null));
-        assertThat(r.string()).hasLength(6591);
+        var r = ok(fineractClient().images.get("staff", staffId, 128, 128, null));
+        assertThat(r.string()).hasSize(7067);
     }
 
     @Test
     @Order(4)
     void getBiggerSize() throws IOException {
-        ResponseBody r = ok(fineract().images.get("staff", staffId, 9000, 6000, null));
-        assertThat(r.string()).hasLength(2846549);
+        var r = ok(fineractClient().images.get("staff", staffId, 9000, 6000, null));
+        assertImage(r.string());
     }
 
     @Test
     @Order(5)
     void getInlineOctetOutput() throws IOException {
         // 3505x1972 is the exact original size of testFile
-        Response<ResponseBody> r = okR(fineract().images.get("staff", staffId, 3505, 1972, "inline_octet"));
-        try (ResponseBody body = r.body()) {
+        var r = okR(fineractClient().images.get("staff", staffId, 3505, 1972, "inline_octet"));
+        try (var body = r.body()) {
             assertThat(body.contentType()).isEqualTo(MediaType.get("image/jpeg"));
-            assertThat(body.bytes().length).isEqualTo(testImage.length());
-            assertThat(body.contentLength()).isEqualTo(testImage.length());
+            assertImage(body);
         }
 
-        var staff = ok(fineract().staff.retrieveOne8(staffId));
-        String expectedFileName = staff.getDisplayName() + "JPEG"; // without dot!
-        assertThat(Parts.fileName(r)).hasValue(expectedFileName);
+        var staff = ok(fineractClient().staff.retrieveOneStaff(staffId));
+        assertThat(Parts.fileName(r)).hasValue(staff.getDisplayName());
     }
 
     @Test
     @Order(6)
     void getOctetOutput() throws IOException {
-        ResponseBody r = ok(fineract().images.get("staff", staffId, 3505, 1972, "octet"));
+        var r = ok(fineractClient().images.get("staff", staffId, 3505, 1972, "octet"));
         assertThat(r.contentType()).isEqualTo(MediaType.get("image/jpeg"));
-        assertThat(r.bytes().length).isEqualTo(testImage.length());
-        assertThat(r.contentLength()).isEqualTo(testImage.length());
+        // NOTE: content length is not a reliable criteria; the server removes metadata (see it as a security feature)
+        // which makes the file immediately only half the size, but pixel wise the images are still the same
+        assertImage(r);
     }
 
     @Test
     @Order(7)
     void getAnotherOutput() throws IOException {
-        ResponseBody r = ok(fineract().images.get("staff", staffId, 3505, 1972, "abcd"));
+        var r = ok(fineractClient().images.get("staff", staffId, 3505, 1972, "abcd"));
         assertThat(r.contentType()).isEqualTo(MediaType.get("text/plain"));
-        assertThat(r.string()).startsWith("data:image/jpeg;base64,");
+        var content = r.string();
+        assertThat(content).startsWith("data:image/jpeg;base64,");
+        assertImage(content);
     }
 
     @Test
     @Order(8)
     void getText() throws IOException {
-        ResponseBody r = ok(fineract().createService(ImagesApiWithHeadersForTest.class).getText("staff", staffId, 3505, 1972, null));
+        var r = ok(fineractClient().createService(ImagesApiWithHeadersForTest.class).getText("staff", staffId, 3505, 1972, null));
         assertThat(r.contentType()).isEqualTo(MediaType.get("text/plain"));
         assertThat(r.string()).startsWith("data:image/jpeg;base64,");
     }
@@ -119,34 +134,182 @@ public class ImageTest extends IntegrationTest {
     @Test
     @Order(9)
     void getBytes() throws IOException {
-        ResponseBody r = ok(fineract().createService(ImagesApiWithHeadersForTest.class).getBytes("staff", staffId, 3505, 1972, null));
+        var r = ok(fineractClient().createService(ImagesApiWithHeadersForTest.class).getBytes("staff", staffId, 3505, 1972, null));
         assertThat(r.contentType()).isEqualTo(MediaType.get("image/jpeg"));
-        assertThat(r.bytes().length).isEqualTo(testImage.length());
+        assertImage(r.bytes());
     }
 
     @Test
     @Order(50)
     void update() {
-        ok(fineract().images.update("staff", staffId, Parts.fromFile(testImage)));
+        ok(fineractClient().images.update("staff", staffId, testPart));
     }
 
     @Test
     @Order(99)
     void delete() {
-        ok(fineract().images.delete("staff", staffId));
-        ok(fineract().images.delete("clients", clientId));
+        ok(fineractClient().images.delete("staff", staffId));
+        ok(fineractClient().images.delete("clients", clientId));
+    }
+
+    @Test
+    @Order(100)
+    void pathTraversalJsp() {
+        final var part = createPart("image-text-wrong-content.jsp", "../../../../../../../../../../tmp/image-text-wrong-content.jsp",
+                "image/gif");
+
+        assertThat(part).isNotNull();
+
+        var exception = assertThrows(Exception.class, () -> {
+            ok(fineractClient().images.create("clients", clientId, part));
+        });
+
+        assertThat(exception).isNotNull();
+
+        log.warn("Should not be able to upload a file that doesn't match the indicated content type: {}", exception.getMessage());
+    }
+
+    @Test
+    @Order(101)
+    void gifWithPngExtension() {
+        final var part = createPart("image-gif-wrong-extension.png", "image-gif-wrong-extension.png", "image/png");
+
+        assertThat(part).isNotNull();
+
+        var exception = assertThrows(Exception.class, () -> {
+            ok(fineractClient().images.create("clients", clientId, part));
+        });
+
+        assertThat(exception).isNotNull();
+
+        log.warn("Should not be able to upload a gif by just renaming the file extension: {}", exception.getMessage());
+    }
+
+    @Test
+    @Order(102)
+    void gifImage() {
+        final var part = createPart("image-gif-correct-extension.gif", "image-gif-correct-extension.gif", "image/png");
+
+        assertThat(part).isNotNull();
+
+        var exception = assertThrows(Exception.class, () -> {
+            ok(fineractClient().images.create("clients", clientId, part));
+        });
+
+        assertThat(exception).isNotNull();
+
+        log.warn("Should not be able to upload a gif it is not whitelisted: {}", exception.getMessage());
+    }
+
+    @Test
+    @Order(103)
+    void pathTraversalJpg() {
+        final var part = createPart("michael.vorburger-crepes.jpg", "../../../../../../../../../../tmp/michael.vorburger-crepes.jpg",
+                "image/jpeg");
+
+        assertThat(part).isNotNull();
+
+        var exception = assertThrows(Exception.class, () -> {
+            ok(fineractClient().images.create("clients", clientId, part));
+        });
+
+        assertThat(exception).isNotNull();
+
+        log.warn("Should not be able to upload a file with a forbidden name pattern: {}", exception.getMessage());
+    }
+
+    @Test
+    @Order(104)
+    void pathTraversalWithAbsolutePathJpg() {
+        create();
+        final var part = createPart("michael.vorburger-crepes.jpg", "../17/michael.vorburger-crepes.jpg", "image/jpeg");
+
+        assertThat(part).isNotNull();
+
+        var exception = assertThrows(Exception.class, () -> {
+            ok(fineractClient().images.create("clients", clientId, part));
+        });
+
+        assertThat(exception).isNotNull();
+
+        log.warn("Should not be able to upload a file with a forbidden name pattern: {}", exception.getMessage());
+    }
+
+    @Test
+    @Order(105)
+    void pathTraversalWithAbsolutePathJpg2() {
+        final var part = createPart("michael.vorburger-crepes.jpg", "..//17//michael.vorburger-crepes.jpg", "image/jpeg");
+
+        assertThat(part).isNotNull();
+
+        var exception = assertThrows(Exception.class, () -> {
+            ok(fineractClient().images.create("clients", clientId, part));
+        });
+
+        assertThat(exception).isNotNull();
+
+        log.warn("Should not be able to upload a file with a forbidden name pattern: {}", exception.getMessage());
+    }
+
+    private MultipartBody.Part createPart(String fileResource, String fileName, String mediaType) {
+        try {
+            byte[] data = ImageTest.class.getClassLoader().getResourceAsStream(fileResource).readAllBytes();
+            var rb = RequestBody.create(data, MediaType.get(mediaType));
+            return MultipartBody.Part.createFormData("file", fileName, rb);
+        } catch (Exception e) {
+            log.error("Error creating file part.", e);
+        }
+
+        return null;
+    }
+
+    private void assertImage(String content) {
+        assertImage(content, TEST_IMAGE_DIFF_PERCENTAGE);
+    }
+
+    private void assertImage(String content, double diffPercent) {
+        if (content.contains(",")) {
+            content = content.substring(content.indexOf(",") + 1);
+        }
+        assertImage(new Base64().decode(content), diffPercent);
+    }
+
+    private void assertImage(ResponseBody r) throws IOException {
+        assertImage(r.bytes(), TEST_IMAGE_DIFF_PERCENTAGE);
+    }
+
+    private void assertImage(byte[] data) {
+        assertImage(data, TEST_IMAGE_DIFF_PERCENTAGE);
+    }
+
+    private void assertImage(byte[] data, double diffPercent) {
+        try (var resource = ImageTest.class.getClassLoader().getResourceAsStream(TEST_RESOURCE)) {
+            requireNonNull(resource);
+
+            var expectedImage = ImageIO.read(resource);
+            var actualImage = ImageIO.read(new ByteArrayInputStream(data));
+
+            var result = new ImageComparison(expectedImage, actualImage).setAllowingPercentOfDifferentPixels(diffPercent).compareImages();
+            // result.writeResultTo(new File("build/diff.png"));
+
+            log.info("Image diff percentage: {}", result.getDifferencePercent());
+
+            assertEquals(MATCH, result.getImageComparisonState(), "The images should be identical");
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     interface ImagesApiWithHeadersForTest extends ImagesApi {
 
         @Headers("Accept: text/plain")
-        @GET("{entityType}/{entityId}/images")
+        @GET("v1/{entityType}/{entityId}/images")
         Call<ResponseBody> getText(@retrofit2.http.Path("entityType") String entityType, @retrofit2.http.Path("entityId") Long entityId,
                 @retrofit2.http.Query("maxWidth") Integer maxWidth, @retrofit2.http.Query("maxHeight") Integer maxHeight,
                 @retrofit2.http.Query("output") String output);
 
         @Headers("Accept: application/octet-stream")
-        @GET("{entityType}/{entityId}/images")
+        @GET("v1/{entityType}/{entityId}/images")
         Call<ResponseBody> getBytes(@retrofit2.http.Path("entityType") String entityType, @retrofit2.http.Path("entityId") Long entityId,
                 @retrofit2.http.Query("maxWidth") Integer maxWidth, @retrofit2.http.Query("maxHeight") Integer maxHeight,
                 @retrofit2.http.Query("output") String output);

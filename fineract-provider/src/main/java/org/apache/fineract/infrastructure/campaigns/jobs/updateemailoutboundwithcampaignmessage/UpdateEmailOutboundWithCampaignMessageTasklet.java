@@ -23,16 +23,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.mustachejava.DefaultMustacheFactory;
 import com.github.mustachejava.Mustache;
 import com.github.mustachejava.MustacheFactory;
+import jakarta.mail.internet.AddressException;
+import jakarta.mail.internet.InternetAddress;
 import java.io.IOException;
-import java.io.StringReader;
+import java.io.Reader;
 import java.io.StringWriter;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import javax.mail.internet.AddressException;
-import javax.mail.internet.InternetAddress;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.infrastructure.campaigns.email.data.EmailCampaignData;
@@ -43,7 +43,6 @@ import org.apache.fineract.infrastructure.campaigns.email.domain.EmailMessageRep
 import org.apache.fineract.infrastructure.campaigns.email.exception.EmailCampaignNotFound;
 import org.apache.fineract.infrastructure.campaigns.email.service.EmailCampaignReadPlatformService;
 import org.apache.fineract.infrastructure.campaigns.email.service.EmailCampaignWritePlatformService;
-import org.apache.fineract.infrastructure.campaigns.jobs.TenantDateTimeUtil;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.portfolio.calendar.service.CalendarUtils;
 import org.apache.fineract.portfolio.client.domain.Client;
@@ -69,13 +68,13 @@ public class UpdateEmailOutboundWithCampaignMessageTasklet implements Tasklet {
                 .retrieveAllScheduleActiveCampaign();
         if (emailCampaignDataCollection != null) {
             for (EmailCampaignData emailCampaignData : emailCampaignDataCollection) {
-                LocalDateTime tenantDateNow = TenantDateTimeUtil.tenantDateTime();
+                LocalDateTime tenantDateNow = DateUtils.getLocalDateTimeOfTenant();
                 LocalDateTime nextTriggerDate = emailCampaignData.getNextTriggerDate().toLocalDateTime();
 
                 log.debug("tenant time {} trigger time {}", tenantDateNow, nextTriggerDate);
-                if (nextTriggerDate.isBefore(tenantDateNow)) {
+                if (DateUtils.isBefore(nextTriggerDate, tenantDateNow)) {
                     insertDirectCampaignIntoEmailOutboundTable(emailCampaignData.getParamValue(), emailCampaignData.getEmailSubject(),
-                            emailCampaignData.getMessage(), emailCampaignData.getCampaignName(), emailCampaignData.getId());
+                            emailCampaignData.getEmailMessage(), emailCampaignData.getCampaignName(), emailCampaignData.getId());
                     updateTriggerDates(emailCampaignData.getId());
                 }
             }
@@ -91,10 +90,10 @@ public class UpdateEmailOutboundWithCampaignMessageTasklet implements Tasklet {
             List<HashMap<String, Object>> runReportObject = emailCampaignWritePlatformService
                     .getRunReportByServiceImpl(campaignParams.get("reportName"), queryParamForRunReport);
             if (runReportObject != null) {
+                EmailCampaign emailCampaign = emailCampaignRepository.findById(campaignId).orElse(null);
                 for (HashMap<String, Object> entry : runReportObject) {
                     String message = compileEmailTemplate(messageTemplate, campaignName, entry);
                     Integer clientId = (Integer) entry.get("id");
-                    EmailCampaign emailCampaign = emailCampaignRepository.findById(campaignId).orElse(null);
                     Client client = clientRepositoryWrapper.findOneWithNotFoundDetection(clientId.longValue());
                     String emailAddress = client.emailAddress();
 
@@ -115,13 +114,12 @@ public class UpdateEmailOutboundWithCampaignMessageTasklet implements Tasklet {
                 .orElseThrow(() -> new EmailCampaignNotFound(campaignId));
         LocalDateTime nextTriggerDate = emailCampaign.getNextTriggerDate();
         emailCampaign.setLastTriggerDate(nextTriggerDate);
-        LocalDateTime newTriggerDateWithTime = CalendarUtils.getNextRecurringDate(emailCampaign.getRecurrence(),
-                emailCampaign.getNextTriggerDate(), nextTriggerDate);
-        if (newTriggerDateWithTime.isBefore(DateUtils.getLocalDateTimeOfTenant())) {
-            newTriggerDateWithTime = CalendarUtils.getNextRecurringDate(emailCampaign.getRecurrence(), emailCampaign.getNextTriggerDate(),
-                    DateUtils.getLocalDateTimeOfTenant());
+        LocalDateTime newTriggerDateWithTime = CalendarUtils.getNextRecurringDate(emailCampaign.getRecurrence(), nextTriggerDate,
+                nextTriggerDate);
+        LocalDateTime tenantDateTime = DateUtils.getLocalDateTimeOfTenant();
+        if (DateUtils.isBefore(newTriggerDateWithTime, tenantDateTime)) {
+            newTriggerDateWithTime = CalendarUtils.getNextRecurringDate(emailCampaign.getRecurrence(), nextTriggerDate, tenantDateTime);
         }
-
         emailCampaign.setNextTriggerDate(newTriggerDateWithTime);
         emailCampaignRepository.saveAndFlush(emailCampaign);
     }
@@ -129,7 +127,7 @@ public class UpdateEmailOutboundWithCampaignMessageTasklet implements Tasklet {
     private String compileEmailTemplate(final String textMessageTemplate, final String campaignName,
             final Map<String, Object> emailParams) {
         final MustacheFactory mf = new DefaultMustacheFactory();
-        final Mustache mustache = mf.compile(new StringReader(textMessageTemplate), campaignName);
+        final Mustache mustache = mf.compile(Reader.of(textMessageTemplate), campaignName);
 
         final StringWriter stringWriter = new StringWriter();
         mustache.execute(stringWriter, emailParams);

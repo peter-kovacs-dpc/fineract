@@ -18,24 +18,24 @@
  */
 package org.apache.fineract.organisation.provisioning.domain;
 
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import javax.persistence.CascadeType;
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.FetchType;
-import javax.persistence.OneToMany;
-import javax.persistence.Table;
-import javax.persistence.UniqueConstraint;
-import org.apache.fineract.accounting.glaccount.domain.GLAccount;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.domain.AbstractAuditableCustom;
 import org.apache.fineract.organisation.provisioning.constants.ProvisioningCriteriaConstants;
-import org.apache.fineract.organisation.provisioning.data.ProvisioningCriteriaDefinitionData;
 import org.apache.fineract.portfolio.loanproduct.domain.LoanProduct;
 import org.apache.fineract.useradministration.domain.AppUser;
 
@@ -114,12 +114,19 @@ public class ProvisioningCriteria extends AbstractAuditableCustom {
         return actualChanges;
     }
 
-    public void update(ProvisioningCriteriaDefinitionData data, GLAccount liability, GLAccount expense) {
-        for (ProvisioningCriteriaDefinition def : provisioningCriteriaDefinition) {
-            if (data.getId().equals(def.getId())) {
-                def.update(data.getMinAge(), data.getMaxAge(), data.getProvisioningPercentage(), liability, expense);
-                break;
-            }
-        }
+    /**
+     * Index the existing definitions by their natural key, {@code categoryId}, for direct lookup during an update.
+     * <p>
+     * The public UPDATE payload keys each definition by {@code categoryId} (one definition per provisioning category),
+     * not by the surrogate {@code id}, which it never carries — matching on the always-null surrogate id is what threw
+     * a {@link NullPointerException} (HTTP 500) on every update. Callers resolve the definition to mutate with a single
+     * {@code get(categoryId)} instead of rescanning the whole set per incoming definition.
+     */
+    public Map<Long, ProvisioningCriteriaDefinition> getDefinitionsByCategoryId() {
+        // (criteria_id, category_id) is not DB-unique, so a criteria could in principle hold two definitions for the
+        // same category. Keep the first (the prior linear scan also matched the first and returned) rather than letting
+        // Collectors.toMap throw IllegalStateException on a duplicate key — an update must not 500 on this edge case.
+        return provisioningCriteriaDefinition.stream().collect(
+                Collectors.toMap(ProvisioningCriteriaDefinition::getCategoryId, Function.identity(), (existing, duplicate) -> existing));
     }
 }

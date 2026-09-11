@@ -18,124 +18,108 @@
  */
 package org.apache.fineract.portfolio.loanproduct.productmix.api;
 
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import java.util.Arrays;
+import jakarta.validation.Valid;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.UriInfo;
 import java.util.Collection;
-import java.util.HashSet;
-import java.util.Set;
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.PUT;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.UriInfo;
-import org.apache.fineract.commands.domain.CommandWrapper;
-import org.apache.fineract.commands.service.CommandWrapperBuilder;
-import org.apache.fineract.commands.service.PortfolioCommandSourceWritePlatformService;
-import org.apache.fineract.infrastructure.core.api.ApiRequestParameterHelper;
-import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
-import org.apache.fineract.infrastructure.core.serialization.ApiRequestJsonSerializationSettings;
-import org.apache.fineract.infrastructure.core.serialization.DefaultToApiJsonSerializer;
-import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
+import java.util.function.Supplier;
+import lombok.RequiredArgsConstructor;
+import org.apache.fineract.command.core.CommandDispatcher;
+import org.apache.fineract.infrastructure.core.annotation.AlternativeOperationId;
 import org.apache.fineract.portfolio.loanproduct.data.LoanProductData;
+import org.apache.fineract.portfolio.loanproduct.productmix.command.ProductMixCreateCommand;
+import org.apache.fineract.portfolio.loanproduct.productmix.command.ProductMixDeleteCommand;
+import org.apache.fineract.portfolio.loanproduct.productmix.command.ProductMixUpdateCommand;
+import org.apache.fineract.portfolio.loanproduct.productmix.data.ProductMixCreateRequest;
+import org.apache.fineract.portfolio.loanproduct.productmix.data.ProductMixCreateResponse;
 import org.apache.fineract.portfolio.loanproduct.productmix.data.ProductMixData;
+import org.apache.fineract.portfolio.loanproduct.productmix.data.ProductMixDeleteRequest;
+import org.apache.fineract.portfolio.loanproduct.productmix.data.ProductMixDeleteResponse;
+import org.apache.fineract.portfolio.loanproduct.productmix.data.ProductMixUpdateRequest;
+import org.apache.fineract.portfolio.loanproduct.productmix.data.ProductMixUpdateResponse;
 import org.apache.fineract.portfolio.loanproduct.productmix.service.ProductMixReadPlatformService;
 import org.apache.fineract.portfolio.loanproduct.service.LoanProductReadPlatformService;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Component;
 
-@Path("/loanproducts/{productId}/productmix")
+@Path("/v1/loanproducts/{productId}/productmix")
 @Component
-@Scope("singleton")
 @Tag(name = "Product Mix")
+@RequiredArgsConstructor
 public class ProductMixApiResource {
-
-    private final String resourceNameForPermissions = "PRODUCTMIX";
-
-    private final Set<String> productMixDataParameters = new HashSet<>(
-            Arrays.asList("productId", "productName", "restrictedProducts", "allowedProducts", "productOptions"));
-
-    private final PlatformSecurityContext context;
-    private final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService;
-    private final ApiRequestParameterHelper apiRequestParameterHelper;
-    private final DefaultToApiJsonSerializer<ProductMixData> toApiJsonSerializer;
 
     private final ProductMixReadPlatformService productMixReadPlatformService;
     private final LoanProductReadPlatformService loanProductReadPlatformService;
-
-    @Autowired
-    public ProductMixApiResource(final PlatformSecurityContext context,
-            final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService,
-            final ApiRequestParameterHelper apiRequestParameterHelper, final DefaultToApiJsonSerializer<ProductMixData> toApiJsonSerializer,
-            final ProductMixReadPlatformService productMixReadPlatformService,
-            final LoanProductReadPlatformService loanProductReadPlatformService) {
-        this.context = context;
-        this.commandsSourceWritePlatformService = commandsSourceWritePlatformService;
-        this.apiRequestParameterHelper = apiRequestParameterHelper;
-        this.toApiJsonSerializer = toApiJsonSerializer;
-        this.productMixReadPlatformService = productMixReadPlatformService;
-        this.loanProductReadPlatformService = loanProductReadPlatformService;
-    }
+    private final CommandDispatcher commandDispatcher;
 
     @GET
-    @Consumes({ MediaType.APPLICATION_JSON })
     @Produces({ MediaType.APPLICATION_JSON })
-    public String retrieveTemplate(@PathParam("productId") final Long productId, @Context final UriInfo uriInfo) {
+    @Operation(summary = "Retrieve Product Mix Template", operationId = "retrieveTemplateProductMix")
+    @AlternativeOperationId("retrieveTemplate_12")
+    public ProductMixData retrieveTemplate(@PathParam("productId") final Long productId, @Context final UriInfo uriInfo) {
 
-        this.context.authenticatedUser().validateHasReadPermission(this.resourceNameForPermissions);
+        var productMixData = productMixReadPlatformService.retrieveLoanProductMixDetails(productId);
 
-        ProductMixData productMixData = this.productMixReadPlatformService.retrieveLoanProductMixDetails(productId);
-
-        final ApiRequestJsonSerializationSettings settings = this.apiRequestParameterHelper.process(uriInfo.getQueryParameters());
-        if (settings.isTemplate()) {
+        if (uriInfo.getQueryParameters().containsKey("template")) {
             final Collection<LoanProductData> productOptions = this.loanProductReadPlatformService.retrieveAvailableLoanProductsForMix();
-            productMixData = ProductMixData.withTemplateOptions(productMixData, productOptions);
+            productMixData = ProductMixData.builder().productId(productMixData.getProductId()).productName(productMixData.getProductName())
+                    .restrictedProducts(productMixData.getRestrictedProducts()).allowedProducts(productMixData.getAllowedProducts())
+                    .productOptions(productOptions).build();
         }
-        return this.toApiJsonSerializer.serialize(settings, productMixData, this.productMixDataParameters);
+        return productMixData;
     }
 
     @POST
     @Consumes({ MediaType.APPLICATION_JSON })
     @Produces({ MediaType.APPLICATION_JSON })
-    public String createProductMix(@PathParam("productId") final Long productId, final String apiRequestBodyAsJson) {
+    @Operation(summary = "Create Product Mix", operationId = "createProductMix")
+    public ProductMixCreateResponse createProductMix(@PathParam("productId") final Long productId,
+            @Valid final ProductMixCreateRequest request) {
 
-        final CommandWrapper commandRequest = new CommandWrapperBuilder().createProductMix(productId).withJson(apiRequestBodyAsJson)
-                .build();
+        request.setProductId(productId);
 
-        final CommandProcessingResult result = this.commandsSourceWritePlatformService.logCommandSource(commandRequest);
+        final var command = new ProductMixCreateCommand();
+        command.setPayload(request);
 
-        return this.toApiJsonSerializer.serialize(result);
+        final Supplier<ProductMixCreateResponse> response = commandDispatcher.dispatch(command);
+        return response.get();
     }
 
     @PUT
     @Consumes({ MediaType.APPLICATION_JSON })
     @Produces({ MediaType.APPLICATION_JSON })
-    public String updateProductMix(@PathParam("productId") final Long productId, final String apiRequestBodyAsJson) {
+    @Operation(summary = "Update Product Mix", operationId = "updateProductMix")
+    public ProductMixUpdateResponse updateProductMix(@PathParam("productId") final Long productId,
+            @Valid final ProductMixUpdateRequest request) {
 
-        final CommandWrapper commandRequest = new CommandWrapperBuilder().updateProductMix(productId).withJson(apiRequestBodyAsJson)
-                .build();
+        request.setProductId(productId);
 
-        final CommandProcessingResult result = this.commandsSourceWritePlatformService.logCommandSource(commandRequest);
+        final var command = new ProductMixUpdateCommand();
+        command.setPayload(request);
 
-        return this.toApiJsonSerializer.serialize(result);
+        final Supplier<ProductMixUpdateResponse> response = commandDispatcher.dispatch(command);
+        return response.get();
     }
 
     @DELETE
-    @Consumes({ MediaType.APPLICATION_JSON })
     @Produces({ MediaType.APPLICATION_JSON })
-    public String deleteProductMix(@PathParam("productId") final Long productId) {
+    @Operation(summary = "Delete Product Mix", operationId = "deleteProductMix")
+    public ProductMixDeleteResponse deleteProductMix(@PathParam("productId") final Long productId) {
 
-        final CommandWrapper commandRequest = new CommandWrapperBuilder().deleteProductMix(productId).build();
+        final var command = new ProductMixDeleteCommand();
+        command.setPayload(ProductMixDeleteRequest.builder().productId(productId).build());
 
-        final CommandProcessingResult result = this.commandsSourceWritePlatformService.logCommandSource(commandRequest);
-
-        return this.toApiJsonSerializer.serialize(result);
+        final Supplier<ProductMixDeleteResponse> response = commandDispatcher.dispatch(command);
+        return response.get();
     }
-
 }

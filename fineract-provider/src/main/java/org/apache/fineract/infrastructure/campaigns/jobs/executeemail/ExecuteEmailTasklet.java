@@ -18,17 +18,18 @@
  */
 package org.apache.fineract.infrastructure.campaigns.jobs.executeemail;
 
+import jakarta.mail.internet.AddressException;
+import jakarta.mail.internet.InternetAddress;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import javax.mail.internet.AddressException;
-import javax.mail.internet.InternetAddress;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.infrastructure.campaigns.email.data.EmailMessageWithAttachmentData;
@@ -39,10 +40,10 @@ import org.apache.fineract.infrastructure.campaigns.email.domain.EmailMessageRep
 import org.apache.fineract.infrastructure.campaigns.email.domain.EmailMessageStatusType;
 import org.apache.fineract.infrastructure.campaigns.email.domain.ScheduledEmailAttachmentFileFormat;
 import org.apache.fineract.infrastructure.campaigns.email.service.EmailMessageJobEmailService;
+import org.apache.fineract.infrastructure.core.config.FineractProperties;
 import org.apache.fineract.infrastructure.core.exception.PlatformDataIntegrityException;
 import org.apache.fineract.infrastructure.dataqueries.domain.Report;
 import org.apache.fineract.infrastructure.dataqueries.service.ReadReportingService;
-import org.apache.fineract.infrastructure.documentmanagement.contentrepository.FileSystemContentRepository;
 import org.apache.fineract.infrastructure.reportmailingjob.helper.IPv4Helper;
 import org.apache.fineract.infrastructure.reportmailingjob.validation.ReportMailingJobValidator;
 import org.apache.fineract.portfolio.client.domain.Client;
@@ -66,6 +67,7 @@ public class ExecuteEmailTasklet implements Tasklet {
     private final EmailMessageJobEmailService emailMessageJobEmailService;
     private final ReadReportingService readReportingService;
     private final ReportMailingJobValidator reportMailingJobValidator;
+    private final FineractProperties fineractProperties;
 
     @Override
     public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) throws Exception {
@@ -150,7 +152,7 @@ public class ExecuteEmailTasklet implements Tasklet {
                         emailMessage.setStatusType(EmailMessageStatusType.SENT.getValue());
                         emailMessageRepository.save(emailMessage);
                     } catch (Exception e) {
-                        emailMessage.updateErrorMessage(e.getMessage());
+                        emailMessage.setErrorMessage(e.getMessage());
                         emailMessage.setStatusType(EmailMessageStatusType.FAILED.getValue());
                         emailMessageRepository.save(emailMessage);
                     }
@@ -178,7 +180,7 @@ public class ExecuteEmailTasklet implements Tasklet {
             switch (entry.getKey()) {
                 case "selectOffice":
                     if (client.getStaff() != null) {
-                        actualParams.put(entry.getKey(), client.getStaff().officeId().toString());
+                        actualParams.put(entry.getKey(), client.getStaff().getOffice().getId().toString());
                     } else {
                         actualParams.put(entry.getKey(), client.getOffice().getId().toString());
                     }
@@ -192,6 +194,8 @@ public class ExecuteEmailTasklet implements Tasklet {
                 case "environementUrl":
                     actualParams.put(entry.getKey(), entry.getKey());
                 break;
+                default:
+                    log.warn("Query parameter could not be mapped: {}", entry.getKey());
             }
         }
         return actualParams;
@@ -205,19 +209,20 @@ public class ExecuteEmailTasklet implements Tasklet {
         try {
             final ByteArrayOutputStream byteArrayOutputStream = readReportingService.generatePentahoReportAsOutputStream(reportName,
                     emailAttachmentFileFormat.getValue(), reportParams, null, emailCampaign.getApprovedBy(), errorLog);
-            final String fileLocation = FileSystemContentRepository.FINERACT_BASE_DIR + File.separator + "";
-            final String fileNameWithoutExtension = fileLocation + File.separator + reportName;
-            if (!new File(fileLocation).isDirectory()) {
-                new File(fileLocation).mkdirs();
+            final Path fileLocation = Path.of(fineractProperties.getContent().getFilesystem().getRootFolder());
+            final Path fileNameWithoutExtension = fileLocation.resolve(reportName);
+            if (!Files.isDirectory(fileLocation)) {
+                Files.createDirectories(fileLocation);
             }
             if (byteArrayOutputStream.size() == 0) {
                 errorLog.append("Pentaho report processing failed, empty output stream created");
             } else if (errorLog.length() == 0 && (byteArrayOutputStream.size() > 0)) {
-                final String fileName = fileNameWithoutExtension + "." + emailAttachmentFileFormat.getValue();
+                final Path fileName = fileNameWithoutExtension.resolveSibling(reportName + "." + emailAttachmentFileFormat.getValue());
 
-                final File file = new File(fileName);
-                final FileOutputStream outputStream = new FileOutputStream(file);
-                byteArrayOutputStream.writeTo(outputStream);
+                final File file = fileName.toFile();
+                try (var outputStream = Files.newOutputStream(fileName)) {
+                    byteArrayOutputStream.writeTo(outputStream);
+                }
                 return file;
             }
         } catch (IOException | PlatformDataIntegrityException e) {

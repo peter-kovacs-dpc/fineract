@@ -21,6 +21,7 @@ package org.apache.fineract.portfolio.client.serialization;
 import com.google.gson.JsonElement;
 import com.google.gson.reflect.TypeToken;
 import java.lang.reflect.Type;
+import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Map;
@@ -40,11 +41,20 @@ import org.springframework.stereotype.Component;
 @Component
 public final class ClientIdentifierCommandFromApiJsonDeserializer extends AbstractFromApiJsonDeserializer<ClientIdentifierCommand> {
 
+    public static final String DOCUMENT_TYPE_ID = "documentTypeId";
+    public static final String DOCUMENT_KEY = "documentKey";
+    public static final String STATUS = "status";
+    public static final String DESCRIPTION = "description";
+    public static final String DOCUMENT_DESCRIPTION = "documentDescription";
+    public static final String ISSUANCE_DATE = "issuanceDate";
+    public static final String EXPIRY_DATE = "expiryDate";
+    public static final String LOCALE = "locale";
+    public static final String DATE_FORMAT = "dateFormat";
     /**
      * The parameters supported for this command.
      */
-    private final Set<String> supportedParameters = new HashSet<>(Arrays.asList("documentTypeId", "documentKey", "status", "description"));
-
+    private static final Set<String> SUPPORTED_PARAMETERS = new HashSet<>(
+            Arrays.asList(DOCUMENT_TYPE_ID, DOCUMENT_KEY, STATUS, DESCRIPTION, ISSUANCE_DATE, EXPIRY_DATE, LOCALE, DATE_FORMAT));
     private final FromJsonHelper fromApiJsonHelper;
 
     @Autowired
@@ -59,14 +69,21 @@ public final class ClientIdentifierCommandFromApiJsonDeserializer extends Abstra
             throw new InvalidJsonException();
         }
 
-        final Type typeOfMap = new TypeToken<Map<String, Object>>() {}.getType();
-        this.fromApiJsonHelper.checkForUnsupportedParameters(typeOfMap, json, this.supportedParameters);
+        final Type typeOfMap = new TypeToken<Map<String, Object>>() {
+
+        }.getType();
+        this.fromApiJsonHelper.checkForUnsupportedParameters(typeOfMap, json, SUPPORTED_PARAMETERS);
 
         final JsonElement element = this.fromApiJsonHelper.parse(json);
-        final Long documentTypeId = this.fromApiJsonHelper.extractLongNamed("documentTypeId", element);
-        final String documentKey = this.fromApiJsonHelper.extractStringNamed("documentKey", element);
-        final String documentDescription = this.fromApiJsonHelper.extractStringNamed("documentDescription", element);
-        final String statusString = this.fromApiJsonHelper.extractStringNamed("status", element);
-        return new ClientIdentifierCommand(documentTypeId, documentKey, statusString, documentDescription);
+        final Long documentTypeId = this.fromApiJsonHelper.extractLongNamed(DOCUMENT_TYPE_ID, element);
+        final String documentKey = this.fromApiJsonHelper.extractStringNamed(DOCUMENT_KEY, element);
+        final String documentDescription = this.fromApiJsonHelper.extractStringNamed(DOCUMENT_DESCRIPTION, element);
+        final String statusString = this.fromApiJsonHelper.extractStringNamed(STATUS, element);
+        final LocalDate issuanceDate = this.fromApiJsonHelper.extractLocalDateNamed(ISSUANCE_DATE, element);
+        final LocalDate expiryDate = this.fromApiJsonHelper.extractLocalDateNamed(EXPIRY_DATE, element);
+        final boolean issuanceDateParameterProvided = this.fromApiJsonHelper.parameterExists(ISSUANCE_DATE, element);
+        final boolean expiryDateParameterProvided = this.fromApiJsonHelper.parameterExists(EXPIRY_DATE, element);
+        return new ClientIdentifierCommand(documentTypeId, documentKey, statusString, documentDescription, issuanceDate, expiryDate,
+                issuanceDateParameterProvided, expiryDateParameterProvided);
     }
 }

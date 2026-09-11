@@ -16,27 +16,45 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+apply plugin: 'org.openapi.generator'
+apply plugin: 'idea'
 description = 'Fineract Client'
 
-apply plugin: 'org.openapi.generator'
-
 apply from: 'dependencies.gradle'
-
-// enable when all tests are migrated
-tasks.cucumber.onlyIf {false}
 
 // TODO: @vidakovic we should publish this lib to Maven Central; do in separate PR
 
 openApiMeta {
     generatorName = 'Fineract'
     packageName = 'org.apache.fineract.client'
-    outputFolder = "$buildDir/meta".toString()
-    // trick to make sure fineract.yaml is generated first
+    outputFolder = file("$buildDir/meta")
+    // trick to make sure fineract.json is generated first
 }
 
 openApiValidate {
-    inputSpec = "file:///$swaggerFile"
+    inputSpec = file(rootProject.ext.swaggerFile)
     recommend = true
+}
+
+openApiGenerate {
+    outputDir = file("$buildDir/generated/temp-java")
+}
+
+idea {
+    module {
+        // Marks the generated directory as a Source Root
+        sourceDirs += file("$buildDir/generated/temp-java/src/main/java")
+        // Or use generatedSourceDirs for explicit "Generated Source" marking
+        generatedSourceDirs += file("$buildDir/generated/temp-java/src/main/java")
+    }
+}
+
+spotbugsMain {
+    enabled = false
+}
+
+spotbugsTest {
+    enabled = false
 }
 
 task buildJavaSdk(type: org.openapitools.generator.gradle.plugin.tasks.GenerateTask) {
@@ -44,9 +62,10 @@ task buildJavaSdk(type: org.openapitools.generator.gradle.plugin.tasks.GenerateT
     verbose = false
     validateSpec = false
     skipValidateSpec = true
-    inputSpec = "file:///$swaggerFile"
-    outputDir = "$buildDir/generated/temp-java".toString()
-    templateDir = "$projectDir/src/main/resources/templates/java"
+    cleanupOutput = true
+    inputSpec = file(rootProject.ext.swaggerFile)
+    outputDir = file("$buildDir/generated/temp-java")
+    templateDir = file("$projectDir/src/main/resources/templates/java")
     groupId = 'org.apache.fineract'
     apiPackage = 'org.apache.fineract.client.services'
     invokerPackage = 'org.apache.fineract.client'
@@ -56,10 +75,14 @@ task buildJavaSdk(type: org.openapitools.generator.gradle.plugin.tasks.GenerateT
         useRxJava2: 'false',
         library: 'retrofit2',
         hideGenerationTimestamp: 'true',
+        containerDefaultToNull: 'true',
+        oauth2Implementation: 'none'
     ]
     generateModelTests = false
     generateApiTests = false
-    ignoreFileOverride = "$projectDir/.openapi-generator-ignore"
+    generateModelDocumentation = false
+    generateApiDocumentation = false
+    ignoreFileOverride = file("$projectDir/.openapi-generator-ignore")
     dependsOn(':fineract-provider:resolve')
 }
 
@@ -68,8 +91,9 @@ task buildTypescriptAngularSdk(type: org.openapitools.generator.gradle.plugin.ta
     verbose = false
     validateSpec = false
     skipValidateSpec = true
-    inputSpec = "file:///$swaggerFile"
-    outputDir = "$buildDir/generated/typescript".toString()
+    cleanupOutput = true
+    inputSpec = file(rootProject.ext.swaggerFile)
+    outputDir = file("$buildDir/generated/typescript")
     apiPackage = 'apache-fineract-client/services'
     invokerPackage = 'apache-fineract-client/invoker'
     modelPackage = 'apache-fineract-client/models'
@@ -78,9 +102,29 @@ task buildTypescriptAngularSdk(type: org.openapitools.generator.gradle.plugin.ta
         configurationPrefix: 'apacheFineractClient',
         ngVersion: '12.0.0',
         npmName: '@apache/fineract-client',
-        npmRepository: "${npmRepository}"
+        npmRepository: "${rootProject.ext.npmRepository}"
     ]
     dependsOn(':fineract-provider:resolve')
+    mustRunAfter(buildJavaSdk)
+}
+
+task buildTypescriptFetchSdk(type: org.openapitools.generator.gradle.plugin.tasks.GenerateTask) {
+    generatorName = 'typescript-fetch'
+    verbose = false
+    validateSpec = false
+    skipValidateSpec = true
+    cleanupOutput = true
+    inputSpec = file(rootProject.ext.swaggerFile)
+    outputDir = file("$buildDir/generated/typescript-fetch")
+    configOptions = [
+        npmName: '@apache/fineract-client-fetch',
+        npmVersion: '1.12.0-SNAPSHOT',
+        typescriptThreePlus: 'true',
+        supportsES6: 'true',
+        withInterfaces: 'true'
+    ]
+    dependsOn(':fineract-provider:resolve')
+    mustRunAfter(buildTypescriptAngularSdk)
 }
 
 task buildAsciidoc(type: org.openapitools.generator.gradle.plugin.tasks.GenerateTask){
@@ -88,8 +132,9 @@ task buildAsciidoc(type: org.openapitools.generator.gradle.plugin.tasks.Generate
     verbose = false
     validateSpec = false
     skipValidateSpec = true
-    inputSpec = "file:///$swaggerFile"
-    outputDir = "$buildDir/generated/asciidoc".toString()
+    cleanupOutput = true
+    inputSpec = file(rootProject.ext.swaggerFile)
+    outputDir = file("$buildDir/generated/asciidoc")
     apiPackage = 'org.apache.fineract.client.services'
     invokerPackage = 'org.apache.fineract.client'
     modelPackage = 'org.apache.fineract.client.models'
@@ -108,26 +153,105 @@ task buildAsciidoc(type: org.openapitools.generator.gradle.plugin.tasks.Generate
         useMethodAndPath: 'true'
     ]
     dependsOn(':fineract-provider:resolve')
+    mustRunAfter(buildTypescriptAngularSdk)
+    // ':fineract-doc' used to force a regeneration by depending on ':fineract-client:clean', which
+    // put an unordered clean into any graph that also built this project. Regenerate here instead.
+    outputs.upToDateWhen { false }
 }
 
-task cleanupJodaImports() {
-    // This is a temporary step to get rid of joda imports in the generated code
-    // At this point it's unknown why it's even generated, probably it's a bug in the generator
-    doLast {
-        copy {
-            from "$buildDir/generated/temp-java".toString()
-            into "$buildDir/generated/java".toString()
-            filter { line ->
-                line.replaceAll("import org\\.joda\\.time\\.\\*;", "")
+// Configure source sets with proper output directories
+sourceSets {
+    main {
+        java {
+            srcDir new File(buildDir, "generated/java/src/main/java")
+            destinationDirectory = layout.buildDirectory.dir('classes/java/main').get().asFile
+        }
+        output.resourcesDir = layout.buildDirectory.dir('resources/main').get().asFile
+    }
+    test {
+        java {
+            destinationDirectory = layout.buildDirectory.dir('classes/java/test').get().asFile
+        }
+        output.resourcesDir = layout.buildDirectory.dir('resources/test').get().asFile
+    }
+}
+
+// Configure jar tasks to handle duplicates
+tasks.withType(Jar).configureEach {
+    // Handle duplicates by using the first occurrence
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+// Improve the cleanup task to track inputs and outputs
+task cleanupGeneratedJavaFiles() {
+    def tempDir = file("$buildDir/generated/temp-java")
+    def targetDir = file("$buildDir/generated/java")
+    
+    inputs.dir(tempDir).optional()
+    outputs.dir(targetDir)
+    onlyIf { tempDir.exists() }
+
+    //TODO: remove harcoded, autogenerated Oltu's OAuthOkHttpClient.java from the generated files
+    doFirst {
+        if (tempDir.exists()) {
+            delete fileTree(tempDir) {
+                include "src/main/java/org/apache/fineract/client/auth/OAuthOkHttpClient.java"
+            }
+        }
+        if (targetDir.exists()) {
+            delete fileTree(targetDir) {
+                include "src/main/java/org/apache/fineract/client/auth/OAuthOkHttpClient.java"
             }
         }
     }
-
+    doLast {
+        if (tempDir.exists()) {
+            copy {
+                from tempDir
+                into targetDir
+                filter { line ->
+                    line
+                        .replaceAll("import org\\.joda\\.time\\.\\*;", "")
+                        .replaceAll(", \\)", ")")
+                        .replaceAll(", , @HeaderMap", ", @HeaderMap")
+                        .replaceAll("\\(, ", "(")
+                }
+                // Also set duplicates strategy for the copy task
+                duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+            }
+        }
+    }
     dependsOn("buildJavaSdk")
 }
 
-// TODO: @vidakovic we could provide even more client libs in different languages (Go, Ruby, Swift etc.)
-compileJava.dependsOn(buildJavaSdk, buildTypescriptAngularSdk, buildAsciidoc, cleanupJodaImports, licenseFormatMain, spotlessMiscApply)
+// Configure Java compilation
+tasks.named('compileJava') {
+    outputs.cacheIf { true }
+    dependsOn(buildJavaSdk, buildTypescriptAngularSdk, buildAsciidoc, cleanupGeneratedJavaFiles, licenseFormatMain, spotlessMiscApply)
+    mustRunAfter(licenseFormatMain, cleanupGeneratedJavaFiles)
+}
+
+// Configure sources jar task
+tasks.named('sourcesJar') {
+    dependsOn(cleanupGeneratedJavaFiles)
+    mustRunAfter(cleanupGeneratedJavaFiles)
+    
+    from(sourceSets.main.java.srcDirs) {
+        include "**/*.java"
+    }
+}
+
+// Configure license formatting
+tasks.named('licenseFormatMain') {
+    dependsOn(cleanupGeneratedJavaFiles)
+    mustRunAfter(cleanupGeneratedJavaFiles)
+    source = sourceSets.main.java.srcDirs
+}
+
+tasks.named('licenseMain') {
+    dependsOn(licenseFormatMain)
+    mustRunAfter(licenseFormatMain)
+}
 
 java {
     // keep this at Java 8, not 17; see https://issues.apache.org/jira/browse/FINERACT-1214
@@ -135,26 +259,17 @@ java {
     targetCompatibility = JavaVersion.VERSION_1_8
 }
 
-tasks.withType(JavaCompile) {
-    // the generated code in build/generated/java/src/main/java/org/apache/fineract/client/auth/OAuthOkHttpClient.java#L71 currently uses deprecated RequestBody.create(MediaType,String)
-    // TODO FINERACT-1247 why does this not work:
-    //   options.compilerArgs -= ["-Xlint:deprecation"]
-    //   options.compilerArgs += ["-Xlint:-deprecation"]
-    // So we just have to use:
-    options.compilerArgs -= ["-Werror"]
-}
-
-configurations {
-    generatedCompileClasspath.extendsFrom implementation
-    generatedRuntimeClasspath.extendsFrom runtimeClasspath
+tasks.withType(JavaCompile).configureEach {
+    options.errorprone {
+        excludedPaths = '.*/build/generated/java/src/main/java/.*'
+    }
 }
 
 test {
     useJUnitPlatform()
 }
 
-sourceSets.main.java.srcDir new File(buildDir, "generated/java/src/main/java")
-
-// NOTE: Gradle suggested these dependencies
-licenseFormatMain.dependsOn buildJavaSdk
-licenseMain.dependsOn licenseFormatMain
+configurations {
+    generatedCompileClasspath.extendsFrom implementation
+    generatedRuntimeClasspath.extendsFrom runtimeClasspath
+}

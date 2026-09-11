@@ -18,13 +18,18 @@
  */
 package org.apache.fineract.infrastructure.core.config;
 
-import org.apache.fineract.infrastructure.core.service.RoutingDataSource;
+import org.apache.fineract.infrastructure.core.service.database.RoutingDataSource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
+import org.springframework.data.jdbc.repository.config.EnableJdbcRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
+@Profile("!liquibase-only")
 @Configuration
+@EnableJdbcRepositories(basePackages = { "org.apache.fineract.command.jdbc.store.domain",
+        "org.apache.fineract.infrastructure.documentmanagement.domain" }, jdbcOperationsRef = "namedParameterJdbcTemplate", transactionManagerRef = "jdbcTransactionManager")
 public class JdbcConfig {
 
     @Bean

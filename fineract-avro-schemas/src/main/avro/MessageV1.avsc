@@ -6,7 +6,7 @@
         {
             "name": "id",
             "doc": "The ID of the message to be sent",
-            "type": "int"
+            "type": "long"
         },
         {
             "name": "source",
@@ -26,6 +26,11 @@
         {
             "name": "createdAt",
             "doc": "The UTC time of when the event has been raised; in ISO_LOCAL_DATE_TIME format. For example 2011-12-03T10:15:30",
+            "type": "string"
+        },
+        {
+            "name": "businessDate",
+            "doc": "The business date when the event has been raised; in ISO_LOCAL_DATE format. For example 2011-12-03",
             "type": "string"
         },
         {

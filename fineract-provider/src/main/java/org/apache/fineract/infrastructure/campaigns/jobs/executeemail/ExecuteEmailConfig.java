@@ -21,6 +21,7 @@ package org.apache.fineract.infrastructure.campaigns.jobs.executeemail;
 import org.apache.fineract.infrastructure.campaigns.email.domain.EmailCampaignRepository;
 import org.apache.fineract.infrastructure.campaigns.email.domain.EmailMessageRepository;
 import org.apache.fineract.infrastructure.campaigns.email.service.EmailMessageJobEmailService;
+import org.apache.fineract.infrastructure.core.config.FineractProperties;
 import org.apache.fineract.infrastructure.dataqueries.service.ReadReportingService;
 import org.apache.fineract.infrastructure.jobs.service.JobName;
 import org.apache.fineract.infrastructure.reportmailingjob.validation.ReportMailingJobValidator;
@@ -28,20 +29,22 @@ import org.apache.fineract.portfolio.loanaccount.domain.LoanRepository;
 import org.apache.fineract.portfolio.savings.domain.SavingsAccountRepository;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
-import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
-import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
+import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.launch.support.RunIdIncrementer;
+import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.batch.core.step.builder.StepBuilder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.PlatformTransactionManager;
 
 @Configuration
 public class ExecuteEmailConfig {
 
     @Autowired
-    private JobBuilderFactory jobs;
+    private JobRepository jobRepository;
     @Autowired
-    private StepBuilderFactory steps;
+    private PlatformTransactionManager transactionManager;
     @Autowired
     private EmailMessageRepository emailMessageRepository;
     @Autowired
@@ -57,19 +60,23 @@ public class ExecuteEmailConfig {
     @Autowired
     private ReportMailingJobValidator reportMailingJobValidator;
 
+    @Autowired
+    private FineractProperties fineractProperties;
+
     @Bean
     protected Step executeEmailStep() {
-        return steps.get(JobName.EXECUTE_EMAIL.name()).tasklet(executeEmailTasklet()).build();
+        return new StepBuilder(JobName.EXECUTE_EMAIL.name(), jobRepository).tasklet(executeEmailTasklet(), transactionManager).build();
     }
 
     @Bean
     public Job executeEmailJob() {
-        return jobs.get(JobName.EXECUTE_EMAIL.name()).start(executeEmailStep()).incrementer(new RunIdIncrementer()).build();
+        return new JobBuilder(JobName.EXECUTE_EMAIL.name(), jobRepository).start(executeEmailStep()).incrementer(new RunIdIncrementer())
+                .build();
     }
 
     @Bean
     public ExecuteEmailTasklet executeEmailTasklet() {
         return new ExecuteEmailTasklet(emailMessageRepository, emailCampaignRepository, loanRepository, savingsAccountRepository,
-                emailMessageJobEmailService, readReportingService, reportMailingJobValidator);
+                emailMessageJobEmailService, readReportingService, reportMailingJobValidator, fineractProperties);
     }
 }
